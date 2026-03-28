@@ -138,13 +138,22 @@ public class KitchenGUI {
     }
 
     private void updateScheduleDisplay(JSONArray schedule) {
-        SwingUtilities.invokeLater(() -> {
-            scheduleArea.setText("--- 全域生產線即時規劃 ---\n");
-            for (int i = 0; i < schedule.length(); i++) {
-                JSONObject o = schedule.getJSONObject(i);
-                scheduleArea.append(String.format("[%d] %s | 預計 %ds\n", 
-                    (i+1), o.getString("item"), o.optInt("expected_at", 0)));
-            }
+    SwingUtilities.invokeLater(() -> {
+        // 使用 StringBuilder 效能較好
+        StringBuilder sb = new StringBuilder("--- 全域生產線即時規劃 (含ID) ---\n");
+        sb.append(String.format("%-5s | %-10s | %-10s\n", "順序", "餐點項目", "預計等待"));
+        sb.append("------------------------------------------\n");
+
+        for (int i = 0; i < schedule.length(); i++) {
+            JSONObject o = schedule.getJSONObject(i);
+            int id = o.optInt("id", 0);
+            String item = o.optString("item", "未知");
+            int wait = o.optInt("expected_at", 0);
+            
+            // 格式化輸出：[ID: 101] 薯條 | 預計 3s
+            sb.append(String.format("[%03d]  %-10s | 預計 %2ds 完成\n", id, item, wait));
+        }
+            scheduleArea.setText(sb.toString());
         });
     }
 
