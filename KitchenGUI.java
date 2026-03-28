@@ -4,6 +4,9 @@ import java.util.ArrayList;
 import java.io.*;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import org.json.*;
 
 public class KitchenGUI {
@@ -12,9 +15,10 @@ public class KitchenGUI {
     private JTextArea scheduleArea, historyArea;
     private ArrayList<JSONObject> orderBuffer = new ArrayList<>();
     private boolean isProductionRunning = false;
-    private int orderIdCounter = 1; // 給每筆訂單唯一的 ID
+    private int orderIdCounter = 1;
 
     public KitchenGUI() {
+        // 1. 先初始化組件
         frame = new JFrame("McOS 智慧廚房核心系統");
         frame.setSize(1100, 700);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -45,14 +49,63 @@ public class KitchenGUI {
         frame.setLayout(new BorderLayout());
         frame.add(btnPanel, BorderLayout.NORTH);
         frame.add(mainPanel, BorderLayout.CENTER);
+
+        // 2. 顯示視窗
         frame.setVisible(true);
+
+        // 3. 最後啟動背景執行緒
+        startAutoSaveTimer();
     }
 
+    // --- 背景存檔執行緒 ---
+    private void startAutoSaveTimer() {
+    Thread saveThread = new Thread(() -> {
+        while (true) {
+            try {
+                Thread.sleep(10000); // 每 10 秒檢查一次
+
+                // 1. 取得目前的排程文字
+                String currentSchedule = scheduleArea.getText();
+
+                // 2. 核心判斷：確保清單有內容才紀錄
+                // 我們檢查文字是否包含 "預計" 或是行數是否大於標題行（通常標題佔 3 行）
+                if (currentSchedule != null && currentSchedule.contains("預計")) {
+                    
+                    // 3. 準備目錄
+                    Path dir = Paths.get("./scheduling_record");
+                    if (!Files.exists(dir)) {
+                        Files.createDirectories(dir);
+                    }
+
+                    // 4. 執行存檔
+                    String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+                    String fileName = "scheduling_" + timestamp + ".txt";
+                    Path filePath = dir.resolve(fileName);
+
+                    Files.write(filePath, currentSchedule.getBytes(StandardCharsets.UTF_8));
+                    System.out.println("系統：偵測到排程項目，自動存檔成功 -> " + fileName);
+                } else {
+                    // 如果是空的，就不執行任何動作，等下一個 10 秒
+                    // System.out.println("系統：排程清單為空，跳過本次存檔。");
+                }
+
+                } catch (InterruptedException e) {
+                    break; 
+                } catch (IOException e) {
+                    System.err.println("存檔失敗: " + e.getMessage());
+                }
+            }
+        });
+        saveThread.setDaemon(true);
+        saveThread.start();
+    }
+
+    // --- 業務邏輯方法 ---
     private void addMenuButton(JPanel p, String name, int time) {
         JButton b = new JButton(name + " (" + time + "s)");
         b.addActionListener(e -> {
             JSONObject obj = new JSONObject();
-            obj.put("id", orderIdCounter++); // 增加唯一 ID
+            obj.put("id", orderIdCounter++);
             obj.put("item", name);
             obj.put("prep_time", time);
             orderBuffer.add(obj);
@@ -63,8 +116,6 @@ public class KitchenGUI {
 
     private void processOrders() {
         if (orderBuffer.isEmpty()) return;
-
-        // 封裝協議：告訴 Python 我要新增訂單
         JSONObject payload = new JSONObject();
         payload.put("type", "ADD_ORDER");
         payload.put("data", new JSONArray(orderBuffer));
@@ -81,12 +132,10 @@ public class KitchenGUI {
         }
     }
 
-    // 啟動生產線：循環向 Python 拿最新第一筆來做
     private void startProductionLine() {
         new Thread(() -> {
             isProductionRunning = true;
             while (true) {
-                // 向 Python 詢問目前排在第一位的是誰
                 JSONObject request = new JSONObject();
                 request.put("type", "GET_STATUS");
                 String resp = sendToPython(request.toString());
@@ -94,7 +143,6 @@ public class KitchenGUI {
 
                 if (currentQueue.length() == 0) break;
 
-                // 取得目前排第一的任務進行製作
                 JSONObject nextTask = currentQueue.getJSONObject(0);
                 doWork(nextTask);
             }
@@ -109,7 +157,7 @@ public class KitchenGUI {
 
         JProgressBar bar = new JProgressBar(0, seconds);
         bar.setStringPainted(true);
-        bar.setString("Cooking: " + name);
+        bar.setString("Cooking: " + name + " (ID:" + id + ")");
         
         SwingUtilities.invokeLater(() -> {
             prodPanel.add(bar);
@@ -122,7 +170,6 @@ public class KitchenGUI {
             try { Thread.sleep(1000); } catch (InterruptedException e) {}
         }
 
-        // 製作完成：通知 Python 移除此 ID
         JSONObject finishReq = new JSONObject();
         finishReq.put("type", "FINISH_ORDER");
         finishReq.put("order_id", id);
@@ -138,26 +185,23 @@ public class KitchenGUI {
     }
 
     private void updateScheduleDisplay(JSONArray schedule) {
-    SwingUtilities.invokeLater(() -> {
-        // 使用 StringBuilder 效能較好
-        StringBuilder sb = new StringBuilder("--- 全域生產線即時規劃 (含ID) ---\n");
-        sb.append(String.format("%-5s | %-10s | %-10s\n", "順序", "餐點項目", "預計等待"));
-        sb.append("------------------------------------------\n");
+        SwingUtilities.invokeLater(() -> {
+            StringBuilder sb = new StringBuilder("--- 全域生產線即時規劃 (含ID) ---\n");
+            sb.append(String.format("%-5s | %-10s | %-10s\n", "順序", "餐點項目", "預計等待"));
+            sb.append("------------------------------------------\n");
 
-        for (int i = 0; i < schedule.length(); i++) {
-            JSONObject o = schedule.getJSONObject(i);
-            int id = o.optInt("id", 0);
-            String item = o.optString("item", "未知");
-            int wait = o.optInt("expected_at", 0);
-            
-            // 格式化輸出：[ID: 101] 薯條 | 預計 3s
-            sb.append(String.format("[%03d]  %-10s | 預計 %2ds 完成\n", id, item, wait));
-        }
+            for (int i = 0; i < schedule.length(); i++) {
+                JSONObject o = schedule.getJSONObject(i);
+                int id = o.optInt("id", 0);
+                String item = o.optString("item", "未知");
+                int wait = o.optInt("expected_at", 0);
+                sb.append(String.format("[%03d]  %-10s | 預計 %2ds 完成\n", id, item, wait));
+            }
             scheduleArea.setText(sb.toString());
         });
     }
 
-    // --- 以下為 UI 輔助與 Socket 方法 (保持不變) ---
+    // --- UI 輔助方法 ---
     private JScrollPane createScrollPanel(JPanel p, String title) {
         JScrollPane sp = new JScrollPane(p);
         sp.setBorder(BorderFactory.createTitledBorder(title));
@@ -181,5 +225,8 @@ public class KitchenGUI {
             return in.readLine();
         } catch (Exception e) { return "[]"; }
     }
-    public static void main(String[] args) { SwingUtilities.invokeLater(KitchenGUI::new); }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(KitchenGUI::new);
+    }
 }
