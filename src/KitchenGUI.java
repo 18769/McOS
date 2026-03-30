@@ -17,11 +17,12 @@ public class KitchenGUI {
     private JFrame frame;
     private JPanel waitPanel, prodPanel;
     private JTextArea scheduleArea, historyArea;
-    private JCheckBox takeoutBox; 
+    private JCheckBox takeoutBox;
     private JLabel statusLabel;
     private ArrayList<JSONObject> orderBuffer = new ArrayList<>();
     private boolean isProductionRunning = false;
     private int orderIdCounter = 1;
+    private boolean isScriptRunning = false;
 
     // --- Modern Theme Colors ---
     private static final Color BG_DARK = new Color(24, 24, 27); // zinc-900
@@ -42,9 +43,8 @@ public class KitchenGUI {
         JPanel topBar = new JPanel(new BorderLayout());
         topBar.setBackground(new Color(18, 18, 20)); // darker than BG_DARK
         topBar.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(0, 0, 2, 0, ACCENT_GOLD),
-            BorderFactory.createEmptyBorder(10, 20, 10, 20)
-        ));
+                BorderFactory.createMatteBorder(0, 0, 2, 0, ACCENT_GOLD),
+                BorderFactory.createEmptyBorder(10, 20, 10, 20)));
 
         JLabel appTitle = new JLabel("McOS 智慧廚房");
         appTitle.setFont(new Font("Microsoft JhengHei", Font.BOLD, 22));
@@ -65,7 +65,7 @@ public class KitchenGUI {
         takeoutBox.setFont(new Font("Microsoft JhengHei", Font.BOLD, 15));
         takeoutBox.setFocusPainted(false);
         actionPanel.add(takeoutBox);
-        
+
         JButton scriptBtn = createFlatButton("📂 載入腳本", new Color(0, 120, 215), Color.WHITE);
         scriptBtn.addActionListener(e -> openScriptFileChooser());
         actionPanel.add(scriptBtn);
@@ -91,11 +91,11 @@ public class KitchenGUI {
         // [左側] 點餐網格區 (Grid Menu)
         JPanel menuSection = createSectionPanel("點餐選項");
         menuSection.setPreferredSize(new Dimension(300, 0));
-        
+
         JPanel gridPanel = new JPanel(new GridLayout(0, 2, 10, 10)); // 2欄網格，無限列
         gridPanel.setBackground(PANEL_BG);
         gridPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        
+
         // 添加入網格的餐點
         addMenuButton(gridPanel, "大麥克", 8);
         addMenuButton(gridPanel, "薯條", 3);
@@ -115,10 +115,17 @@ public class KitchenGUI {
                 this.thumbColor = BORDER_COLOR;
                 this.trackColor = PANEL_BG;
             }
+
             @Override
-            protected JButton createDecreaseButton(int orientation) { return createZeroButton(); }
+            protected JButton createDecreaseButton(int orientation) {
+                return createZeroButton();
+            }
+
             @Override
-            protected JButton createIncreaseButton(int orientation) { return createZeroButton(); }
+            protected JButton createIncreaseButton(int orientation) {
+                return createZeroButton();
+            }
+
             private JButton createZeroButton() {
                 JButton b = new JButton();
                 b.setPreferredSize(new Dimension(0, 0));
@@ -127,31 +134,31 @@ public class KitchenGUI {
         });
         menuScroll.getVerticalScrollBar().setUnitIncrement(16);
         menuSection.add(menuScroll, BorderLayout.CENTER);
-        
+
         mainContent.add(menuSection, BorderLayout.WEST);
 
         // [右側] 監控區 (Monitors)
         JPanel monitorsPanel = new JPanel(new GridLayout(1, 3, 15, 0));
         monitorsPanel.setBackground(BG_DARK);
 
-        waitPanel = new JPanel(); 
+        waitPanel = new JPanel();
         waitPanel.setLayout(new BoxLayout(waitPanel, BoxLayout.Y_AXIS));
         waitPanel.setBackground(PANEL_BG);
         monitorsPanel.add(createScrollPanel(waitPanel, "【1】 等待中"));
 
-        prodPanel = new JPanel(); 
+        prodPanel = new JPanel();
         prodPanel.setLayout(new BoxLayout(prodPanel, BoxLayout.Y_AXIS));
         prodPanel.setBackground(PANEL_BG);
         monitorsPanel.add(createScrollPanel(prodPanel, "【2】 廚房製作"));
 
         JPanel dataPanel = new JPanel(new GridLayout(2, 1, 0, 15));
         dataPanel.setBackground(BG_DARK);
-        
+
         scheduleArea = new JTextArea();
         historyArea = new JTextArea();
         dataPanel.add(createScrollText(scheduleArea, "【3】 智慧排程"));
         dataPanel.add(createScrollText(historyArea, "【4】 完成紀錄"));
-        
+
         monitorsPanel.add(dataPanel);
         mainContent.add(monitorsPanel, BorderLayout.CENTER);
 
@@ -173,12 +180,18 @@ public class KitchenGUI {
         btn.setFocusPainted(false);
         btn.setBorder(BorderFactory.createEmptyBorder(8, 15, 8, 15));
         btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        
+
         // 懸停特效
         btn.addMouseListener(new MouseAdapter() {
             Color originalBg = btn.getBackground();
-            public void mouseEntered(MouseEvent e) { btn.setBackground(originalBg.brighter()); }
-            public void mouseExited(MouseEvent e) { btn.setBackground(originalBg); }
+
+            public void mouseEntered(MouseEvent e) {
+                btn.setBackground(originalBg.brighter());
+            }
+
+            public void mouseExited(MouseEvent e) {
+                btn.setBackground(originalBg);
+            }
         });
         return btn;
     }
@@ -191,7 +204,7 @@ public class KitchenGUI {
         JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10));
         header.setBackground(new Color(30, 30, 34));
         header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_COLOR));
-        
+
         JLabel titleLabel = new JLabel(title);
         titleLabel.setFont(new Font("Microsoft JhengHei", Font.BOLD, 16));
         titleLabel.setForeground(ACCENT_GOLD);
@@ -216,26 +229,30 @@ public class KitchenGUI {
                         statusLabel.setForeground(new Color(255, 80, 80)); // lighter red
                     });
                 }
-                try { Thread.sleep(3000); } catch (InterruptedException e) {}
+                try {
+                    Thread.sleep(3000);
+                } catch (InterruptedException e) {
+                }
             }
         });
-        t.setDaemon(true); t.start();
+        t.setDaemon(true);
+        t.start();
     }
 
     // --- 網格按鈕卡片樣式 ---
     private void addMenuButton(JPanel p, String name, int time) {
         String subText = time > 0 ? time + "s" : "[🍱]";
-        JButton b = new JButton("<html><center><b>" + name + "</b><br><font size='3' color='#A1A1AA'>" + subText + "</font></center></html>");
+        JButton b = new JButton("<html><center><b>" + name + "</b><br><font size='3' color='#A1A1AA'>" + subText
+                + "</font></center></html>");
         b.setFocusPainted(false);
         b.setBackground(PANEL_BG);
         b.setForeground(TEXT_PRIMARY);
         b.setFont(new Font("Microsoft JhengHei", Font.PLAIN, 14));
-        
+
         // 自訂卡片邊框
         b.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(BORDER_COLOR, 1),
-            BorderFactory.createEmptyBorder(15, 5, 15, 5)
-        ));
+                BorderFactory.createLineBorder(BORDER_COLOR, 1),
+                BorderFactory.createEmptyBorder(15, 5, 15, 5)));
         b.setCursor(new Cursor(Cursor.HAND_CURSOR));
 
         // 卡片懸停效果
@@ -243,16 +260,15 @@ public class KitchenGUI {
             public void mouseEntered(MouseEvent evt) {
                 b.setBackground(BORDER_COLOR);
                 b.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(ACCENT_GOLD, 1),
-                    BorderFactory.createEmptyBorder(15, 5, 15, 5)
-                ));
+                        BorderFactory.createLineBorder(ACCENT_GOLD, 1),
+                        BorderFactory.createEmptyBorder(15, 5, 15, 5)));
             }
+
             public void mouseExited(MouseEvent evt) {
                 b.setBackground(PANEL_BG);
                 b.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(BORDER_COLOR, 1),
-                    BorderFactory.createEmptyBorder(15, 5, 15, 5)
-                ));
+                        BorderFactory.createLineBorder(BORDER_COLOR, 1),
+                        BorderFactory.createEmptyBorder(15, 5, 15, 5)));
             }
         });
 
@@ -280,11 +296,13 @@ public class KitchenGUI {
             label.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
             waitPanel.add(label);
         }
-        waitPanel.revalidate(); waitPanel.repaint();
+        waitPanel.revalidate();
+        waitPanel.repaint();
     }
 
     private void processOrders() {
-        if (orderBuffer.isEmpty()) return;
+        if (orderBuffer.isEmpty())
+            return;
         JSONObject payload = new JSONObject();
         payload.put("type", "ADD_ORDER");
         payload.put("data", new JSONArray(orderBuffer));
@@ -292,7 +310,8 @@ public class KitchenGUI {
         orderBuffer.clear();
         updateWaitPanel();
         updateScheduleDisplay(new JSONArray(response));
-        if (!isProductionRunning) startProductionLine();
+        if (!isProductionRunning)
+            startProductionLine();
     }
 
     private void startProductionLine() {
@@ -303,7 +322,8 @@ public class KitchenGUI {
                 request.put("type", "GET_STATUS");
                 String resp = sendToPython(request.toString());
                 JSONArray currentQueue = new JSONArray(resp);
-                if (currentQueue.length() == 0) break;
+                if (currentQueue.length() == 0)
+                    break;
                 doWork(currentQueue.getJSONObject(0));
             }
             isProductionRunning = false;
@@ -321,7 +341,7 @@ public class KitchenGUI {
         bar.setBackground(BG_DARK);
         bar.setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
         bar.setFont(new Font("Microsoft JhengHei", Font.BOLD, 13));
-        
+
         if (isTakeout) {
             bar.setForeground(new Color(255, 140, 0));
             bar.setString("外帶: " + name + " (#" + id + ")");
@@ -329,13 +349,13 @@ public class KitchenGUI {
             bar.setForeground(new Color(34, 199, 100)); // lighter green flat
             bar.setString("內用: " + name + " (#" + id + ")");
         }
-        
+
         SwingUtilities.invokeLater(() -> {
             JPanel barWrap = new JPanel(new BorderLayout());
             barWrap.setBackground(PANEL_BG);
             barWrap.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
             barWrap.add(bar, BorderLayout.CENTER);
-            
+
             prodPanel.add(barWrap);
             prodPanel.revalidate();
         });
@@ -343,19 +363,22 @@ public class KitchenGUI {
         for (int i = 0; i <= seconds; i++) {
             final int current = i;
             SwingUtilities.invokeLater(() -> bar.setValue(current));
-            try { Thread.sleep(1000); } catch (InterruptedException e) {}
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+            }
         }
 
         JSONObject finishReq = new JSONObject();
         finishReq.put("type", "FINISH_ORDER");
         finishReq.put("order_id", id);
-        finishReq.put("item", name); 
+        finishReq.put("item", name);
         String latestResp = sendToPython(finishReq.toString());
-        
+
         SwingUtilities.invokeLater(() -> {
             // Remove the specific wrapper
             for (Component comp : prodPanel.getComponents()) {
-                if (comp instanceof JPanel && ((JPanel)comp).getComponent(0) == bar) {
+                if (comp instanceof JPanel && ((JPanel) comp).getComponent(0) == bar) {
                     prodPanel.remove(comp);
                     break;
                 }
@@ -376,8 +399,8 @@ public class KitchenGUI {
             for (int i = 0; i < schedule.length(); i++) {
                 JSONObject o = schedule.getJSONObject(i);
                 String type = o.optBoolean("is_takeout") ? "[外帶]" : "[內用]";
-                sb.append(String.format("[#%02d] %-12s | %3ds | %s\n", 
-                    o.getInt("id"), o.getString("item"), o.getInt("expected_at"), type));
+                sb.append(String.format("[#%02d] %-12s | %3ds | %s\n",
+                        o.getInt("id"), o.getString("item"), o.getInt("expected_at"), type));
             }
             scheduleArea.setText(sb.toString());
         });
@@ -391,10 +414,27 @@ public class KitchenGUI {
         sp.getVerticalScrollBar().setUnitIncrement(16);
         // hide scrollbar UI similar to menu
         sp.getVerticalScrollBar().setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
-            @Override protected void configureScrollBarColors() { this.thumbColor = BORDER_COLOR; this.trackColor = PANEL_BG; }
-            @Override protected JButton createDecreaseButton(int orientation) { return createZeroButton(); }
-            @Override protected JButton createIncreaseButton(int orientation) { return createZeroButton(); }
-            private JButton createZeroButton() { JButton b = new JButton(); b.setPreferredSize(new Dimension(0, 0)); return b; }
+            @Override
+            protected void configureScrollBarColors() {
+                this.thumbColor = BORDER_COLOR;
+                this.trackColor = PANEL_BG;
+            }
+
+            @Override
+            protected JButton createDecreaseButton(int orientation) {
+                return createZeroButton();
+            }
+
+            @Override
+            protected JButton createIncreaseButton(int orientation) {
+                return createZeroButton();
+            }
+
+            private JButton createZeroButton() {
+                JButton b = new JButton();
+                b.setPreferredSize(new Dimension(0, 0));
+                return b;
+            }
         });
         section.add(sp, BorderLayout.CENTER);
         return section;
@@ -402,19 +442,36 @@ public class KitchenGUI {
 
     private JPanel createScrollText(JTextArea ta, String title) {
         JPanel section = createSectionPanel(title);
-        ta.setEditable(false); 
+        ta.setEditable(false);
         ta.setBackground(PANEL_BG);
         ta.setForeground(TEXT_PRIMARY);
         ta.setFont(new Font("Microsoft JhengHei", Font.PLAIN, 14));
         ta.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        
+
         JScrollPane sp = new JScrollPane(ta);
         sp.setBorder(null);
         sp.getVerticalScrollBar().setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
-            @Override protected void configureScrollBarColors() { this.thumbColor = BORDER_COLOR; this.trackColor = PANEL_BG; }
-            @Override protected JButton createDecreaseButton(int orientation) { return createZeroButton(); }
-            @Override protected JButton createIncreaseButton(int orientation) { return createZeroButton(); }
-            private JButton createZeroButton() { JButton b = new JButton(); b.setPreferredSize(new Dimension(0, 0)); return b; }
+            @Override
+            protected void configureScrollBarColors() {
+                this.thumbColor = BORDER_COLOR;
+                this.trackColor = PANEL_BG;
+            }
+
+            @Override
+            protected JButton createDecreaseButton(int orientation) {
+                return createZeroButton();
+            }
+
+            @Override
+            protected JButton createIncreaseButton(int orientation) {
+                return createZeroButton();
+            }
+
+            private JButton createZeroButton() {
+                JButton b = new JButton();
+                b.setPreferredSize(new Dimension(0, 0));
+                return b;
+            }
         });
         section.add(sp, BorderLayout.CENTER);
         return section;
@@ -431,27 +488,58 @@ public class KitchenGUI {
     }
 
     private void executeScriptFile(File file) {
+        if (isScriptRunning) {
+            JOptionPane.showMessageDialog(frame, "同時間不能執行兩部腳本！", "警告", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        isScriptRunning = true;
+
         new Thread(() -> {
             try {
                 String content = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
                 JSONObject script = new JSONObject(content);
                 JSONArray steps = script.getJSONArray("steps");
-                
+
+                SwingUtilities.invokeLater(() -> showAutoCloseMsg("腳本即將開始...", 3000));
+                Thread.sleep(3000);
+
                 SwingUtilities.invokeLater(() -> statusLabel.setText("● 系統狀態: 腳本執行中"));
                 executeSteps(steps);
+
+                SwingUtilities.invokeLater(() -> showAutoCloseMsg("腳本執行結束！", 3000));
                 SwingUtilities.invokeLater(() -> statusLabel.setText("● 系統狀態: 腳本已完成"));
-                
+                Thread.sleep(3000);
+
             } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame, "腳本解析錯誤: " + ex.getMessage()));
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame, "腳本解析錯誤: " + ex.getMessage(),
+                        "錯誤", JOptionPane.ERROR_MESSAGE));
+            } finally {
+                isScriptRunning = false;
             }
         }).start();
     }
 
+    private void showAutoCloseMsg(String msg, int delayMs) {
+        JDialog dialog = new JDialog(frame, "系統提示", false);
+        JOptionPane opt = new JOptionPane(msg, JOptionPane.INFORMATION_MESSAGE, JOptionPane.DEFAULT_OPTION, null,
+                new Object[] {}, null);
+        dialog.setContentPane(opt);
+        dialog.pack();
+        dialog.setLocationRelativeTo(frame);
+
+        javax.swing.Timer timer = new javax.swing.Timer(delayMs, e -> dialog.dispose());
+        timer.setRepeats(false);
+        timer.start();
+
+        dialog.setVisible(true);
+    }
+
+    // 腳本系統
     private void executeSteps(JSONArray steps) throws Exception {
         for (int i = 0; i < steps.length(); i++) {
             JSONObject step = steps.getJSONObject(i);
             String action = step.optString("action", "");
-            
+
             switch (action) {
                 case "SET_MODE":
                     boolean isTakeout = step.optBoolean("takeout", false);
@@ -462,7 +550,7 @@ public class KitchenGUI {
                     int prepTime = step.optInt("prep_time", 5);
                     int count = step.optInt("count", 1);
                     SwingUtilities.invokeAndWait(() -> {
-                        for(int c=0; c<count; c++){
+                        for (int c = 0; c < count; c++) {
                             JSONObject obj = new JSONObject();
                             obj.put("id", orderIdCounter++);
                             obj.put("item", item);
@@ -505,22 +593,28 @@ public class KitchenGUI {
     private String sendToPython(String payload) {
         try (Socket s = new Socket()) {
             s.connect(new InetSocketAddress("localhost", 9999), 1000);
-            BufferedWriter out = new BufferedWriter(new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8));
+            BufferedWriter out = new BufferedWriter(
+                    new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8));
             BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
-            out.write(payload); out.newLine(); out.flush();
+            out.write(payload);
+            out.newLine();
+            out.flush();
             return in.readLine();
-        } catch (Exception e) { return "[]"; }
+        } catch (Exception e) {
+            return "[]";
+        }
     }
 
     private void startAutoSaveTimer() {
         Thread t = new Thread(() -> {
-            while(true) {
+            while (true) {
                 try {
                     Thread.sleep(10000L); // 每10秒存一次
                     String content = scheduleArea.getText();
                     if (content != null && content.contains("ID")) {
-                        Path dir = Paths.get("./data"); 
-                        if (!Files.exists(dir)) Files.createDirectories(dir);
+                        Path dir = Paths.get("./data");
+                        if (!Files.exists(dir))
+                            Files.createDirectories(dir);
                         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
                         Path filePath = dir.resolve("order_backup_" + ts + ".txt");
                         Files.write(filePath, content.getBytes(StandardCharsets.UTF_8));
@@ -530,13 +624,13 @@ public class KitchenGUI {
                 }
             }
         });
-        t.setDaemon(true); 
+        t.setDaemon(true);
         t.start();
     }
 
     public static void main(String[] args) {
         // 設定 Swing 去除預設樣式以達到扁平化
-        UIManager.put("Button.select", BORDER_COLOR); 
-        SwingUtilities.invokeLater(KitchenGUI::new); 
+        UIManager.put("Button.select", BORDER_COLOR);
+        SwingUtilities.invokeLater(KitchenGUI::new);
     }
 }
