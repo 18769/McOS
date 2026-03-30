@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "script_name": "午餐尖峰負載與重複排單",
+    "description": "測試複雜流程與 REPEAT 控制"
+  },
+  "steps": [
+    { "action": "SET_MODE", "takeout": false },
+    { "action": "ADD_ORDER", "item": "大麥克", "prep_time": 8, "count": 2 },
+    { "action": "ADD_ORDER", "item": "薯條", "prep_time": 3, "count": 1 },
+    { "action": "SEND_ORDERS" },
+    { "action": "WAIT", "seconds": 3 },
+    { "action": "SET_MODE", "takeout": true },
+    {
+      "action": "REPEAT",
+      "times": 5,
+      "steps": [
+        { "action": "ADD_ORDER", "item": "蘋果派", "prep_time": 4, "count": 1 },
+        { "action": "SEND_ORDERS" },
+        { "action": "WAIT", "seconds": 1 }
+      ]
+    }
+  ]
+}

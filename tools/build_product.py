@@ -1,9 +1,13 @@
 import os
+import sys
 import shutil
 import time
 
+# Get project root to make paths bulletproof
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(ROOT_DIR)
+
 def build_project():
-    # 1. 產生暫存的中繼啟動腳本 (PyInstaller 需要此檔案作為入口點)
     print("==> [1/4] 正在產生打包用中繼程式碼...")
     launcher_code = """import os
 import sys
@@ -61,24 +65,22 @@ if __name__ == '__main__':
 
     # 2. 編譯 Java 以確保拿到最新的 .class 檔
     print("==> [2/4] 正在重新編譯 Java 原始碼...")
-    if os.system('javac -encoding utf-8 -cp ".;json-20240303.jar" KitchenGUI.java') != 0:
+    # 確保 bin 資料夾存在
+    os.makedirs("bin", exist_ok=True)
+    if os.system('javac -d bin -encoding utf-8 -cp "lib/json-20240303.jar" src/KitchenGUI.java') != 0:
         print("[錯誤] Java 編譯失敗，請檢查程式碼再重新打包。")
         return
 
     # 3. 呼叫 PyInstaller 進行打包
     print("==> [3/4] 正在利用 PyInstaller 將專案封裝為 EXE... (此步驟可能需要 1~2 分鐘)")
-    cmd = 'pyinstaller --onefile --noconfirm --add-data "KitchenGUI.class;." --add-data "json-20240303.jar;." --name McOS_Product temp_launcher.py'
+    cmd = 'pyinstaller --onefile --noconfirm --add-data "bin/*;." --add-data "lib/json-20240303.jar;." --add-data "src/algo/scheduler.py;." --name McOS_Product temp_launcher.py'
     if os.system(cmd) != 0:
         print("[錯誤] PyInstaller 打包失敗。")
         return
 
     # 4. 將生成的 exe 移動到 product 資料夾並清理所有暫存檔
     print("==> [4/4] 正在轉移成品至 product 目錄並還原開發環境...")
-    
-    # 建立 product 目錄
     os.makedirs("product", exist_ok=True)
-    
-    # 搬移 exe
     exe_path = os.path.join("dist", "McOS_Product.exe")
     if os.path.exists(exe_path):
         target_path = os.path.join("product", "McOS_Product.exe")
@@ -89,7 +91,6 @@ if __name__ == '__main__':
     else:
         print("\\n[錯誤] 找不到打包後的 exe 檔案。\\n")
 
-    # 安全地刪除暫存檔案與目錄
     def safe_remove(path):
         try:
             if os.path.isdir(path):
@@ -97,7 +98,7 @@ if __name__ == '__main__':
             elif os.path.isfile(path):
                 os.remove(path)
         except Exception as e:
-            print(f"警告：無法清理暫存檔案 {path}: {e}")
+            pass
 
     safe_remove("temp_launcher.py")
     safe_remove("temp_launcher.spec")
