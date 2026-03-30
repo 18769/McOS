@@ -1,58 +1,37 @@
 @echo off
-<<<<<<< Updated upstream
-title 智慧廚房一鍵啟動工具
+title McOS 智慧廚房一鍵啟動工具
 chcp 65001 > nul
 
-echo [1/4] 正在清理舊的 Python 進程 (Port 9999)...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :9999') do taskkill /F /PID %%a 2>nul
-
-echo [2/4] 正在編譯 Java 程式碼...
-javac -encoding utf-8 -cp ".;json-20240303.jar" KitchenGUI.java
-if %errorlevel% neq 0 (
-    echo [錯誤] Java 編譯失敗，請檢查程式碼！
-=======
-title McOS Smart Kitchen Launcher
-echo [1/4] Cleaning Port 9999...
+echo [1/4] 正在清理舊的連接埠 9999 (Python 進程)...
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr :9999') do (
     if NOT "%%a"=="0" (
-        echo Found old PID: %%a, killing process...
         taskkill /F /PID %%a >nul 2>nul
     )
 )
 
-echo [2/4] Compiling Java source (including JSON lib)...
-javac -d bin -encoding utf-8 -cp "%~dp0lib\json-20240303.jar" src\KitchenGUI.java
+echo [2/4] 正在編譯 Java 程式碼 (包含 JSON 函式庫)...
+:: 建立 bin 資料夾以保持整潔
+if not exist "bin" mkdir bin
+javac -d bin -encoding utf-8 -cp "lib\json-20240303.jar;." src\KitchenGUI.java
+
 if %errorlevel% neq 0 (
-    echo [ERROR] Java compilation failed!
->>>>>>> Stashed changes
+    echo [錯誤] Java 編譯失敗，請檢查程式碼或 lib 路徑！
     pause
     exit /b
 )
 
-<<<<<<< Updated upstream
 echo [3/4] 正在背景啟動 Python 排程引擎...
-start /b python scheduler.py
+start "McOS_Python_Engine" /b python "src\algo\scheduler.py"
 
 echo [4/4] 啟動 Java 模擬畫面...
-echo ---------------------------------------
-java -Dfile.encoding=UTF-8 -cp ".;json-20240303.jar" KitchenGUI
+echo --------------------------------------------------
+echo 提示：勾選「外送模式」後點擊餐點以測試邏輯。
+echo --------------------------------------------------
+:: 執行時需包含 bin 資料夾與 jar 包
+java -Dfile.encoding=UTF-8 -cp "lib\json-20240303.jar;bin" KitchenGUI
 
-echo ---------------------------------------
+echo --------------------------------------------------
 echo 視窗已關閉，正在結束所有相關程序...
-taskkill /F /IM python.exe /T 2>nul
-=======
-echo [3/4] Starting Python Scheduler...
-start "McOS_Python_Engine" python "%~dp0src\algo\scheduler.py"
-
-echo [4/4] Starting Java KitchenGUI Interface...
-echo --------------------------------------------------
-echo Tip: Check 'Takeout Mode' then click meals to test logic.
-echo --------------------------------------------------
-java -Dfile.encoding=UTF-8 -cp "%~dp0lib\json-20240303.jar;%~dp0bin" KitchenGUI
-
-echo --------------------------------------------------
-echo UI Closed. Cleaning background processes...
 taskkill /FI "WINDOWTITLE eq McOS_Python_Engine*" /F /T 2>nul
-echo System shutdown successfully.
->>>>>>> Stashed changes
+echo 系統已成功關閉。
 pause
