@@ -37,12 +37,12 @@
 
 ### 2. 點擊一份餐點 (`ADD_ORDER`)
 模擬滑鼠去點擊畫面上的漢堡或薯條。會將點單送入「等待暫存區」。
-* 屬性 `"count"`: 可選，若設定為 3，這行會連點三次。
+* 屬性 `"count"`: 可選，若設定為 3，這行會連點三次（預設為 1）。
+* 屬性 `"prep_time"`: 可選，若不填寫（或設定為不大於 0），系統會自動帶入餐點的預設製作秒數（例如大麥克 8 秒、薯條 3 秒等）。
 ```json
 {
   "action": "ADD_ORDER",
   "item": "大麥克",
-  "prep_time": 8,
   "count": 2
 }
 ```
@@ -75,7 +75,7 @@
   "action": "REPEAT",
   "times": 3,
   "steps": [
-    { "action": "ADD_ORDER", "item": "薯條", "prep_time": 3, "count": 1 },
+    { "action": "ADD_ORDER", "item": "薯條", "count": 1 },
     { "action": "SEND_ORDERS" },
     { "action": "WAIT", "seconds": 2 }
   ]
@@ -96,8 +96,8 @@
   },
   "steps": [
     { "action": "SET_MODE", "takeout": false },
-    { "action": "ADD_ORDER", "item": "大麥克", "prep_time": 8, "count": 2 },
-    { "action": "ADD_ORDER", "item": "薯條", "prep_time": 3, "count": 1 },
+    { "action": "ADD_ORDER", "item": "大麥克", "count": 2 },
+    { "action": "ADD_ORDER", "item": "薯條", "count": 1 },
     { "action": "SEND_ORDERS" },
     { "action": "WAIT", "seconds": 3 },
     { "action": "SET_MODE", "takeout": true },
@@ -105,7 +105,7 @@
       "action": "REPEAT",
       "times": 5,
       "steps": [
-        { "action": "ADD_ORDER", "item": "蘋果派", "prep_time": 4, "count": 1 },
+        { "action": "ADD_ORDER", "item": "蘋果派", "count": 1 },
         { "action": "SEND_ORDERS" },
         { "action": "WAIT", "seconds": 1 }
       ]

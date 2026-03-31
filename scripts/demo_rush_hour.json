@@ -5,8 +5,9 @@
   },
   "steps": [
     { "action": "SET_MODE", "takeout": false },
-    { "action": "ADD_ORDER", "item": "大麥克", "prep_time": 8, "count": 2 },
-    { "action": "ADD_ORDER", "item": "薯條", "prep_time": 3, "count": 1 },
+    { "action": "ADD_ORDER", "item": "大麥克", "count": 2 },
+    { "action": "ADD_ORDER", "item": "薯條", "count": 1 },
+    { "action": "ADD_ORDER", "item": "可樂", "count": 8 },
     { "action": "SEND_ORDERS" },
     { "action": "WAIT", "seconds": 3 },
     { "action": "SET_MODE", "takeout": true },
@@ -14,9 +15,19 @@
       "action": "REPEAT",
       "times": 5,
       "steps": [
-        { "action": "ADD_ORDER", "item": "蘋果派", "prep_time": 4, "count": 1 },
+        { "action": "ADD_ORDER", "item": "蘋果派", "count": 1 },
         { "action": "SEND_ORDERS" },
         { "action": "WAIT", "seconds": 1 }
+      ]
+    },
+
+    {
+      "action":"REPEAT",
+      "times":10,
+      "steps":[
+        {"action":"ADD_ORDER","item":"大麥克","count":5},
+        {"action":"SEND_ORDERS"},
+        {"action": "WAIT","seconds":2}
       ]
     }
   ]

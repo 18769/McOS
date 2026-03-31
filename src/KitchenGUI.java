@@ -4,6 +4,9 @@ import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.io.*;
 import java.net.Socket;
 import java.net.InetSocketAddress;
@@ -14,12 +17,17 @@ import java.time.format.DateTimeFormatter;
 import org.json.*;
 
 public class KitchenGUI {
+    private JButton scriptBtn;
+    private Thread scriptThread = null; // 用來保存當前執行的執行緒
+
     private JFrame frame;
     private JPanel waitPanel, prodPanel;
     private JTextArea scheduleArea, historyArea;
     private JCheckBox takeoutBox;
     private JLabel statusLabel;
     private ArrayList<JSONObject> orderBuffer = new ArrayList<>();
+    private LinkedList<String> historyList = new LinkedList<>();
+    private LinkedHashMap<String, Integer> mealPrepTimes = new LinkedHashMap<>();
     private boolean isProductionRunning = false;
     private int orderIdCounter = 1;
     private boolean isScriptRunning = false;
@@ -33,6 +41,8 @@ public class KitchenGUI {
     private static final Color TEXT_SECONDARY = new Color(161, 161, 170); // zinc-400
 
     public KitchenGUI() {
+        loadMeals(); // 載入餐點資料庫
+
         // --- 1. 全域外觀設定 ---
         frame = new JFrame("McOS 智慧廚房 - 專業出餐系統");
         frame.setSize(1200, 750); // 維持大小
@@ -66,8 +76,14 @@ public class KitchenGUI {
         takeoutBox.setFocusPainted(false);
         actionPanel.add(takeoutBox);
 
-        JButton scriptBtn = createFlatButton("📂 載入腳本", new Color(0, 120, 215), Color.WHITE);
-        scriptBtn.addActionListener(e -> openScriptFileChooser());
+        scriptBtn = createFlatButton("📂 載入腳本", new Color(0, 120, 215), Color.WHITE);
+        scriptBtn.addActionListener(e -> {
+            if (!isScriptRunning) {
+                openScriptFileChooser(); // 傳入按鈕
+            } else {
+                executeScriptFile(null, scriptBtn); // 傳入 null File 觸發中斷判斷
+            }
+        });
         actionPanel.add(scriptBtn);
 
         JButton clearBtn = createFlatButton("🗑️ 清空暫存", new Color(220, 53, 69), Color.WHITE);
@@ -96,15 +112,10 @@ public class KitchenGUI {
         gridPanel.setBackground(PANEL_BG);
         gridPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        // 添加入網格的餐點
-        addMenuButton(gridPanel, "大麥克", 8);
-        addMenuButton(gridPanel, "薯條", 3);
-        addMenuButton(gridPanel, "雞塊", 5);
-        addMenuButton(gridPanel, "蘋果派", 4);
-        addMenuButton(gridPanel, "玉米湯", 2);
-        addMenuButton(gridPanel, "可樂", 1);
-        addMenuButton(gridPanel, "大麥克預設", 0);
-        addMenuButton(gridPanel, "雞塊特餐", 0);
+        // 添加入網格的餐點 (從 meal.json 動態生成)
+        for (Map.Entry<String, Integer> entry : mealPrepTimes.entrySet()) {
+            addMenuButton(gridPanel, entry.getKey(), entry.getValue());
+        }
 
         // 隱藏滾動條維持乾淨外觀
         JScrollPane menuScroll = new JScrollPane(gridPanel);
@@ -181,16 +192,20 @@ public class KitchenGUI {
         btn.setBorder(BorderFactory.createEmptyBorder(8, 15, 8, 15));
         btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
 
+        btn.putClientProperty("baseBg", bg);
+
         // 懸停特效
         btn.addMouseListener(new MouseAdapter() {
-            Color originalBg = btn.getBackground();
-
             public void mouseEntered(MouseEvent e) {
-                btn.setBackground(originalBg.brighter());
+                Color base = (Color) btn.getClientProperty("baseBg");
+                if (base != null)
+                    btn.setBackground(base.brighter());
             }
 
             public void mouseExited(MouseEvent e) {
-                btn.setBackground(originalBg);
+                Color base = (Color) btn.getClientProperty("baseBg");
+                if (base != null)
+                    btn.setBackground(base);
             }
         });
         return btn;
@@ -273,15 +288,69 @@ public class KitchenGUI {
         });
 
         b.addActionListener(e -> {
-            JSONObject obj = new JSONObject();
-            obj.put("id", orderIdCounter++);
-            obj.put("item", name);
-            obj.put("prep_time", time);
-            obj.put("is_takeout", takeoutBox.isSelected());
-            orderBuffer.add(obj);
-            updateWaitPanel();
+            addOrderToBuffer(name, time, 1, takeoutBox.isSelected());
         });
         p.add(b);
+    }
+
+    private int getDefaultPrepTime(String item) {
+        return mealPrepTimes.getOrDefault(item, 5);
+    }
+
+    private void loadMeals() {
+        try {
+            File file = new File("DB/meal.json");
+            if (!file.exists()) {
+                createDefaultMealJson(file);
+            }
+            String content = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+            JSONObject root = new JSONObject(content);
+            JSONArray meals = root.getJSONArray("meals");
+            for (int i = 0; i < meals.length(); i++) {
+                JSONObject m = meals.getJSONObject(i);
+                mealPrepTimes.put(m.getString("name"), m.getInt("prep_time"));
+            }
+        } catch (Exception e) {
+            System.err.println("讀取 meal.json 失敗，改用預設資料: " + e.getMessage());
+            mealPrepTimes.put("大麥克", 8);
+            mealPrepTimes.put("薯條", 3);
+            mealPrepTimes.put("雞塊", 5);
+            mealPrepTimes.put("蘋果派", 4);
+            mealPrepTimes.put("玉米湯", 2);
+            mealPrepTimes.put("可樂", 1);
+            mealPrepTimes.put("大麥克預設", 0);
+            mealPrepTimes.put("雞塊特餐", 0);
+        }
+    }
+
+    private void createDefaultMealJson(File file) throws IOException {
+        JSONObject root = new JSONObject();
+        JSONArray meals = new JSONArray();
+        meals.put(new JSONObject().put("name", "大麥克").put("prep_time", 8));
+        meals.put(new JSONObject().put("name", "薯條").put("prep_time", 3));
+        meals.put(new JSONObject().put("name", "雞塊").put("prep_time", 5));
+        meals.put(new JSONObject().put("name", "蘋果派").put("prep_time", 4));
+        meals.put(new JSONObject().put("name", "玉米湯").put("prep_time", 2));
+        meals.put(new JSONObject().put("name", "可樂").put("prep_time", 1));
+        meals.put(new JSONObject().put("name", "大麥克預設").put("prep_time", 0));
+        meals.put(new JSONObject().put("name", "雞塊特餐").put("prep_time", 0));
+        root.put("meals", meals);
+        Files.write(file.toPath(), root.toString(4).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void addOrderToBuffer(String item, int prepTime, int count, boolean isTakeout) {
+        if (prepTime <= 0) {
+            prepTime = getDefaultPrepTime(item);
+        }
+        for (int i = 0; i < count; i++) {
+            JSONObject obj = new JSONObject();
+            obj.put("id", orderIdCounter++);
+            obj.put("item", item);
+            obj.put("prep_time", prepTime);
+            obj.put("is_takeout", isTakeout);
+            orderBuffer.add(obj);
+        }
+        updateWaitPanel();
     }
 
     private void updateWaitPanel() {
@@ -386,9 +455,22 @@ public class KitchenGUI {
             prodPanel.revalidate();
             prodPanel.repaint();
             String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-            historyArea.append("[" + time + "] OK " + name + " (#" + id + ") 完成\n");
+            String record = "[" + time + "] OK " + name + " (#" + id + ") 完成";
+            addHistoryRecord(record);
             updateScheduleDisplay(new JSONArray(latestResp));
         });
+    }
+
+    private void addHistoryRecord(String record) {
+        historyList.add(record);
+        if (historyList.size() > 10) {
+            historyList.removeFirst();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String s : historyList) {
+            sb.append(s).append("\n");
+        }
+        historyArea.setText(sb.toString());
     }
 
     private void updateScheduleDisplay(JSONArray schedule) {
@@ -483,40 +565,60 @@ public class KitchenGUI {
         chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("JSON 腳本檔", "json"));
         if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
             File file = chooser.getSelectedFile();
-            executeScriptFile(file);
+            executeScriptFile(file, this.scriptBtn);
         }
     }
 
-    private void executeScriptFile(File file) {
+    private void executeScriptFile(File file, JButton targetBtn) {
         if (isScriptRunning) {
-            JOptionPane.showMessageDialog(frame, "同時間不能執行兩部腳本！", "警告", JOptionPane.WARNING_MESSAGE);
+            if (scriptThread != null) {
+                scriptThread.interrupt();
+                SwingUtilities.invokeLater(() -> showAutoCloseMsg("腳本已中斷", 2000));
+            }
             return;
         }
         isScriptRunning = true;
 
-        new Thread(() -> {
+        SwingUtilities.invokeLater(() -> {
+            targetBtn.setText("🛑 中斷腳本");
+            targetBtn.putClientProperty("baseBg", new Color(220, 53, 69));
+            targetBtn.setBackground(new Color(220, 53, 69)); // 轉為紅色
+        });
+
+        scriptThread = new Thread(() -> {
             try {
                 String content = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
                 JSONObject script = new JSONObject(content);
                 JSONArray steps = script.getJSONArray("steps");
 
-                SwingUtilities.invokeLater(() -> showAutoCloseMsg("腳本即將開始...", 3000));
-                Thread.sleep(3000);
+                SwingUtilities.invokeLater(() -> showAutoCloseMsg("腳本即將開始...", 2000));
+                Thread.sleep(2000);
 
                 SwingUtilities.invokeLater(() -> statusLabel.setText("● 系統狀態: 腳本執行中"));
                 executeSteps(steps);
 
-                SwingUtilities.invokeLater(() -> showAutoCloseMsg("腳本執行結束！", 3000));
+                SwingUtilities.invokeLater(() -> showAutoCloseMsg("腳本執行結束！", 2000));
                 SwingUtilities.invokeLater(() -> statusLabel.setText("● 系統狀態: 腳本已完成"));
-                Thread.sleep(3000);
+                Thread.sleep(2000);
 
+            } catch (InterruptedException ex) {
+                // 當 thread.interrupt() 被呼叫時，Thread.sleep 會拋出此異常
+                SwingUtilities.invokeLater(() -> historyArea.append("⚠️ 腳本已被使用者強制中斷\n"));
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame, "腳本解析錯誤: " + ex.getMessage(),
                         "錯誤", JOptionPane.ERROR_MESSAGE));
             } finally {
+                scriptThread = null;
                 isScriptRunning = false;
+                SwingUtilities.invokeLater(() -> {
+                    targetBtn.setText("📂 載入腳本");
+                    targetBtn.putClientProperty("baseBg", new Color(0, 120, 215));
+                    targetBtn.setBackground(new Color(0, 120, 215)); // 恢復藍色
+                    statusLabel.setText("● 系統狀態: 待機中");
+                });
             }
-        }).start();
+        });
+        scriptThread.start();
     }
 
     private void showAutoCloseMsg(String msg, int delayMs) {
@@ -537,6 +639,10 @@ public class KitchenGUI {
     // 腳本系統
     private void executeSteps(JSONArray steps) throws Exception {
         for (int i = 0; i < steps.length(); i++) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException("User requested stop");
+            }
+
             JSONObject step = steps.getJSONObject(i);
             String action = step.optString("action", "");
 
@@ -547,18 +653,10 @@ public class KitchenGUI {
                     break;
                 case "ADD_ORDER":
                     String item = step.getString("item");
-                    int prepTime = step.optInt("prep_time", 5);
+                    int prepTime = step.optInt("prep_time", 0);
                     int count = step.optInt("count", 1);
                     SwingUtilities.invokeAndWait(() -> {
-                        for (int c = 0; c < count; c++) {
-                            JSONObject obj = new JSONObject();
-                            obj.put("id", orderIdCounter++);
-                            obj.put("item", item);
-                            obj.put("prep_time", prepTime);
-                            obj.put("is_takeout", takeoutBox.isSelected());
-                            orderBuffer.add(obj);
-                        }
-                        updateWaitPanel();
+                        addOrderToBuffer(item, prepTime, count, takeoutBox.isSelected());
                     });
                     break;
                 case "SEND_ORDERS":

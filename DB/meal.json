@@ -1,0 +1,16 @@
+{
+  "meals": [
+    { "name": "大麥克", "prep_time": 8 },
+    { "name": "小麥克", "prep_time": 6 },
+    { "name": "麥克", "prep_time": 7 },
+    { "name": "薯條", "prep_time": 3 },
+    { "name": "雞塊", "prep_time": 5 },
+    { "name": "蘋果派", "prep_time": 4 },
+    { "name": "玉米湯", "prep_time": 2 },
+    { "name": "可樂", "prep_time": 1 },
+    { "name": "舊東洋熱狗", "prep_time": 5 },
+    { "name": "冰美式", "prep_time": 3 },
+    { "name": "大麥克預設", "prep_time": 0 },
+    { "name": "雞塊特餐", "prep_time": 0 }
+  ]
+}
