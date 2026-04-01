@@ -1,0 +1,1 @@
+# python環境3.13 java環境jdk26
