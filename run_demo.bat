@@ -1,28 +1,72 @@
 @echo off
+REM McOS - 示範模式 (使用專案內的 env)
+REM 使用專案內的 JRE 和 Python 環境
+
+setlocal enabledelayedexpansion
+
+set "PROJECT_ROOT=%~dp0"
+set "SRC_DIR=%PROJECT_ROOT%src"
+set "BIN_DIR=%PROJECT_ROOT%bin"
+set "LIB_DIR=%PROJECT_ROOT%lib"
+set "ENV_DIR=%PROJECT_ROOT%env"
+set "JRE_PATH=%ENV_DIR%\jre\bin\java.exe"
+set "PYTHON_PATH=%ENV_DIR%\python_env\python.exe"
+set "CLASSPATH=%BIN_DIR%;%LIB_DIR%\json-20240303.jar"
+
 chcp 65001 > nul
 echo ==========================================
-echo       McOS 智慧廚房 - 系統啟動中...
+echo    McOS 智慧廚房 - 示範模式啟動中...
 echo ==========================================
+echo.
 
-:: 0. 檢查並清除佔用 Port 9999 的舊行程 (避免 Address already in use 錯誤)
-echo [0/2] 正在清理可能殘留的 Port 9999...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :9999') do (
+:: 檢查 JRE 是否存在
+if not exist "%JRE_PATH%" (
+    echo ✗ 錯誤：專案內的 JRE 不存在！
+    echo 路徑：%JRE_PATH%
+    pause
+    exit /b 1
+)
+
+:: 檢查 Python 是否存在
+if not exist "%PYTHON_PATH%" (
+    echo ✗ 錯誤：專案內的 Python 不存在！
+    echo 路徑：%PYTHON_PATH%
+    pause
+    exit /b 1
+)
+
+:: 編譯 Java 程式碼
+echo [1/3] 編譯 Java 程式碼...
+if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
+cd "%SRC_DIR%"
+javac -encoding UTF-8 -cp "%LIB_DIR%\json-20240303.jar" -d "%BIN_DIR%" db\DBHelper.java gui\KitchenGUI.java
+
+if !errorlevel! neq 0 (
+    echo ✗ Java 編譯失敗！
+    pause
+    exit /b 1
+)
+
+:: 清除佔用的 Port
+echo [2/4] 清理可能殘留的行程...
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr :9999') do (
     if not "%%a"=="0" (
-        taskkill /F /PID %%a > nul 2>&1
+        taskkill /F /PID %%a >nul 2>&1
     )
 )
-timeout /t 1 /nobreak > nul
+timeout /t 1 /nobreak >nul
 
-:: 1. 使用相對路徑啟動 Python 伺服器 (假設你的伺服器叫 server.py)
-echo [1/2] 正在啟動 Python 後端伺服器...
-start /B .\env\python_env\python.exe .\src\algo\scheduler.py
+:: 啟動 Python 排程引擎
+echo [3/4] 啟動 Python 排程引擎...
+start "" "%PYTHON_PATH%" "%SRC_DIR%\algo\scheduler.py"
+timeout /t 2 /nobreak >nul
 
-:: 等待 2 秒鐘讓 Python 伺服器綁定 Port 9999
-timeout /t 2 /nobreak > nul
+:: 啟動 Java GUI
+echo [4/4] 啟動 Java GUI 前端...
+echo ==========================================
+cd "%PROJECT_ROOT%"
+"%JRE_PATH%" -cp "%CLASSPATH%" gui.KitchenGUI
 
-:: 2. 啟動 Java GUI 前端 (這會讀取 bin 資料夾內編譯好的 class，以及 lib 下的 json 庫)
-echo [2/2] 正在啟動 Java GUI 前端...
-.\env\jre\bin\java.exe -cp "bin;lib\*" KitchenGUI
-
+echo.
 echo 系統已關閉。
 pause

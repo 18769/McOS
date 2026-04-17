@@ -1,3 +1,5 @@
+package gui;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
@@ -15,6 +17,7 @@ import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import org.json.*;
+import db.DBHelper;
 
 public class KitchenGUI {
     private JButton scriptBtn;
@@ -299,43 +302,34 @@ public class KitchenGUI {
 
     private void loadMeals() {
         try {
-            File file = new File("DB/meal.json");
-            if (!file.exists()) {
-                createDefaultMealJson(file);
-            }
-            String content = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
-            JSONObject root = new JSONObject(content);
-            JSONArray meals = root.getJSONArray("meals");
+            // 從資料庫讀取餐點資料
+            JSONArray meals = DBHelper.queryMeals();
+            System.out.println("=== 餐點資料調試 ===");
             for (int i = 0; i < meals.length(); i++) {
                 JSONObject m = meals.getJSONObject(i);
-                mealPrepTimes.put(m.getString("name"), m.getInt("prep_time"));
+                String mealName = m.getString("meal_name");
+                int prepTime = m.getInt("prep_time");
+                System.out.println("  餐點: " + mealName + " | 準備時間: " + prepTime);
+                mealPrepTimes.put(mealName, prepTime);
             }
+            System.out.println("從資料庫成功載入 " + meals.length() + " 個餐點\n");
         } catch (Exception e) {
-            System.err.println("讀取 meal.json 失敗，改用預設資料: " + e.getMessage());
+            System.err.println("讀取資料庫失敗，改用預設資料: " + e.getMessage());
+            e.printStackTrace();
+            // 預設資料備用
             mealPrepTimes.put("大麥克", 8);
+            mealPrepTimes.put("小麥克", 6);
+            mealPrepTimes.put("麥克", 7);
             mealPrepTimes.put("薯條", 3);
             mealPrepTimes.put("雞塊", 5);
             mealPrepTimes.put("蘋果派", 4);
             mealPrepTimes.put("玉米湯", 2);
             mealPrepTimes.put("可樂", 1);
+            mealPrepTimes.put("舊東洋熱狗", 5);
+            mealPrepTimes.put("冰美式", 3);
             mealPrepTimes.put("大麥克預設", 0);
             mealPrepTimes.put("雞塊特餐", 0);
         }
-    }
-
-    private void createDefaultMealJson(File file) throws IOException {
-        JSONObject root = new JSONObject();
-        JSONArray meals = new JSONArray();
-        meals.put(new JSONObject().put("name", "大麥克").put("prep_time", 8));
-        meals.put(new JSONObject().put("name", "薯條").put("prep_time", 3));
-        meals.put(new JSONObject().put("name", "雞塊").put("prep_time", 5));
-        meals.put(new JSONObject().put("name", "蘋果派").put("prep_time", 4));
-        meals.put(new JSONObject().put("name", "玉米湯").put("prep_time", 2));
-        meals.put(new JSONObject().put("name", "可樂").put("prep_time", 1));
-        meals.put(new JSONObject().put("name", "大麥克預設").put("prep_time", 0));
-        meals.put(new JSONObject().put("name", "雞塊特餐").put("prep_time", 0));
-        root.put("meals", meals);
-        Files.write(file.toPath(), root.toString(4).getBytes(StandardCharsets.UTF_8));
     }
 
     private void addOrderToBuffer(String item, int prepTime, int count, boolean isTakeout) {
