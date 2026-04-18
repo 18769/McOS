@@ -1,0 +1,27 @@
+{
+  "steps": [
+    {
+      "comment": "切換至進階模式以啟用 SJF 演算法 (對應筆記：SJF 解決方案)",
+      "action": "SWITCH_MODE",
+      "mode": "ADVANCED"
+    },
+    {
+      "comment": "加入長任務 (大麥克 25s)",
+      "action": "ADD_ORDER",
+      "item": "大麥克特餐",
+      "prep_time": 25,
+      "count": 1
+    },
+    {
+      "comment": "加入多個短任務 (可樂 1s)",
+      "action": "ADD_ORDER",
+      "item": "可樂",
+      "prep_time": 1,
+      "count": 3
+    },
+    {
+      "comment": "送出排程：觀察 SJF 是否自動將短任務挪到最前面 (解決護車效應)",
+      "action": "SEND_ORDERS"
+    }
+  ]
+}

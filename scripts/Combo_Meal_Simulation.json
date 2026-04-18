@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "script_name": "雞塊套餐模擬",
+    "description": "模擬點購一份大份雞塊特餐組合"
+  },
+  "steps": [
+    { "action": "SET_MODE", "takeout": true },
+    { "action": "ADD_ORDER", "item": "雞塊", "prep_time": 5, "count": 2 },
+    { "action": "ADD_ORDER", "item": "薯條", "prep_time": 3, "count": 1 },
+    { "action": "ADD_ORDER", "item": "玉米湯", "prep_time": 2, "count": 1 },
+    { "action": "SEND_ORDERS" }
+  ]
+}
