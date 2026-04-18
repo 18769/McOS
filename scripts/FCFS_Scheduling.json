@@ -1,0 +1,27 @@
+{
+  "steps": [
+    {
+      "comment": "確保系統處於正常排程模式 (對應筆記：FCFS)",
+      "action": "SWITCH_MODE",
+      "mode": "NORMAL"
+    },
+    {
+      "comment": "1. 先加入一個執行時間極長的行程 (對應筆記：觸發護車效應場景)",
+      "action": "ADD_ORDER",
+      "item": "大麥克特餐",
+      "prep_time": 25,
+      "count": 1
+    },
+    {
+      "comment": "2. 緊接著加入多個執行時間短的行程",
+      "action": "ADD_ORDER",
+      "item": "可樂",
+      "prep_time": 1,
+      "count": 3
+    },
+    {
+      "comment": "3. 送出排程，觀察短任務是否被迫排在長任務後面等待",
+      "action": "SEND_ORDERS"
+    }
+  ]
+}

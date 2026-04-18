@@ -1,0 +1,43 @@
+{
+  "steps": [
+    {
+      "comment": "確保處於進階模式以啟用 Aging 邏輯 (對應筆記：解決飢餓問題的方案)",
+      "action": "SWITCH_MODE",
+      "mode": "ADVANCED"
+    },
+    {
+      "comment": "1. 先加入一個長任務 (大麥克 25s)，它在 SJF 下容易被插隊",
+      "action": "ADD_ORDER",
+      "item": "大麥克 (等很久的人)",
+      "prep_time": 25,
+      "count": 1
+    },
+    {
+      "action": "SEND_ORDERS"
+    },
+    {
+      "comment": "2. 利用 REPEAT 指令持續加入極短任務，模擬短任務不斷湧入的場景",
+      "action": "REPEAT",
+      "times": 5,
+      "steps": [
+        {
+          "action": "ADD_ORDER",
+          "item": "可樂 (插隊的小孩)",
+          "prep_time": 1,
+          "count": 2
+        },
+        {
+          "action": "SEND_ORDERS"
+        },
+        {
+          "action": "WAIT",
+          "seconds": 2
+        }
+      ]
+    },
+    {
+      "comment": "觀察點：隨著等待時間增加，長任務最終是否會因為「老化」而排到最前面",
+      "action": "SEND_ORDERS"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "script_name": "巢狀迴圈壓力測試",
+    "description": "測試 REPEAT 嵌套結構下的系統極限負載"
+  },
+  "steps": [
+    {
+      "action": "REPEAT",
+      "times": 2,
+      "steps": [
+        {
+          "action": "REPEAT",
+          "times": 5,
+          "steps": [
+            { "action": "ADD_ORDER", "item": "薯條", "prep_time": 3, "count": 2 },
+            { "action": "SEND_ORDERS" }
+          ]
+        },
+        { "action": "WAIT", "seconds": 2 }
+      ]
+    }
+  ]
+}
