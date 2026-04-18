@@ -32,6 +32,7 @@ public class KitchenGUI {
     private LinkedList<String> historyList = new LinkedList<>();
     private LinkedHashMap<String, Integer> mealPrepTimes = new LinkedHashMap<>();
     private LinkedHashMap<String, String> combos = new LinkedHashMap<>();  // <combo_name, food_items>
+    private LinkedHashMap<Integer, JSONObject> orderRegistry = new LinkedHashMap<>();  // 訂單登記簿：order_id -> {name, total_tasks, remaining_tasks}
     private boolean isProductionRunning = false;
     private int orderIdCounter = 1;
     private boolean isScriptRunning = false;
@@ -407,7 +408,7 @@ public class KitchenGUI {
         }
         for (int i = 0; i < count; i++) {
             JSONObject obj = new JSONObject();
-            obj.put("id", orderIdCounter++);
+            // ✓ 暫時不分配 id，等到發送時才一起分配
             obj.put("item", item);
             obj.put("prep_time", prepTime);
             obj.put("is_takeout", isTakeout);
@@ -436,12 +437,92 @@ public class KitchenGUI {
         if (orderBuffer.isEmpty())
             return;
         
-        // 解析套餐：將套餐拆成單項任務
-        JSONArray expandedOrders = expandCombos(new JSONArray(orderBuffer));
+        // ✓ 一次發送排程 = 一個訂單編號
+        int batchOrderId = orderIdCounter++;
+        JSONArray ordersToSend = new JSONArray();
+        
+        // 累計所有餐點名稱和任務數
+        JSONArray allItems = new JSONArray();
+        int totalTasks = 0;
+        StringBuilder orderDisplayName = new StringBuilder();
+        
+        System.out.println("📋 訂單 #" + batchOrderId + " 包含：");
+        
+        for (Object item : orderBuffer) {
+            JSONObject order = (JSONObject) item;
+            String itemName = order.getString("item");
+            boolean isTakeout = order.optBoolean("is_takeout", false);
+            int prepTime = order.optInt("prep_time", 0);
+            
+            // 累計名稱
+            if (orderDisplayName.length() > 0) {
+                orderDisplayName.append("、");
+            }
+            orderDisplayName.append(itemName);
+            
+            try {
+                // 嘗試查詢是否為套餐
+                JSONArray comboItems = DBHelper.getComboItems(itemName);
+                
+                if (comboItems.length() > 0) {
+                    // 是套餐
+                    System.out.println("  📦 套餐: " + itemName + " (" + comboItems.length() + " 項)");
+                    JSONObject orderObj = new JSONObject();
+                    orderObj.put("id", batchOrderId);
+                    orderObj.put("item", itemName);
+                    orderObj.put("is_takeout", isTakeout);
+                    
+                    JSONArray items = new JSONArray();
+                    int totalTime = 0;
+                    for (int j = 0; j < comboItems.length(); j++) {
+                        JSONObject subItem = comboItems.getJSONObject(j);
+                        items.put(subItem);
+                        totalTime += subItem.getInt("prep_time");
+                    }
+                    orderObj.put("items", items);
+                    orderObj.put("total_prep_time", totalTime);
+                    ordersToSend.put(orderObj);
+                    
+                    totalTasks += comboItems.length();
+                } else {
+                    // 不是套餐：單項
+                    System.out.println("  🍔 單項: " + itemName);
+                    JSONObject orderObj = new JSONObject();
+                    orderObj.put("id", batchOrderId);
+                    orderObj.put("item", itemName);
+                    orderObj.put("is_takeout", isTakeout);
+                    orderObj.put("prep_time", prepTime);
+                    ordersToSend.put(orderObj);
+                    
+                    totalTasks += 1;
+                }
+            } catch (Exception e) {
+                System.out.println("查詢套餐失敗，當作單項: " + itemName);
+                JSONObject orderObj = new JSONObject();
+                orderObj.put("id", batchOrderId);
+                orderObj.put("item", itemName);
+                orderObj.put("is_takeout", order.optBoolean("is_takeout", false));
+                orderObj.put("prep_time", prepTime);
+                ordersToSend.put(orderObj);
+                
+                totalTasks += 1;
+            }
+        }
+        
+        // 註冊訂單到 orderRegistry
+        JSONObject orderInfo = new JSONObject();
+        orderInfo.put("name", orderDisplayName.toString());
+        orderInfo.put("total_tasks", totalTasks);
+        orderInfo.put("remaining_tasks", totalTasks);
+        orderInfo.put("is_takeout", orderBuffer.get(0).optBoolean("is_takeout", false));
+        orderRegistry.put(batchOrderId, orderInfo);
+        
+        System.out.println("  → 訂單 #" + batchOrderId + " 完整名稱: " + orderDisplayName.toString());
+        System.out.println("  → 總任務數: " + totalTasks);
         
         JSONObject payload = new JSONObject();
         payload.put("type", "ADD_ORDER");
-        payload.put("data", expandedOrders);
+        payload.put("data", ordersToSend);
         String response = sendToPython(payload.toString());
         orderBuffer.clear();
         updateWaitPanel();
@@ -453,46 +534,7 @@ public class KitchenGUI {
     /**
      * 將訂單中的套餐拆解成單項任務
      */
-    private JSONArray expandCombos(JSONArray orders) {
-        JSONArray expanded = new JSONArray();
-        
-        for (int i = 0; i < orders.length(); i++) {
-            JSONObject order = orders.getJSONObject(i);
-            String itemName = order.getString("item");
-            int orderId = order.getInt("id");
-            boolean isTakeout = order.optBoolean("is_takeout", false);
-            
-            try {
-                // 嘗試從資料庫查詢此名稱是否為套餐
-                JSONArray comboItems = DBHelper.getComboItems(itemName);
-                
-                if (comboItems.length() > 0) {
-                    // 是套餐，拆解成子項目
-                    System.out.println("→ 拆解套餐: " + itemName);
-                    for (int j = 0; j < comboItems.length(); j++) {
-                        JSONObject subItem = comboItems.getJSONObject(j);
-                        JSONObject task = new JSONObject();
-                        task.put("id", orderId);
-                        task.put("item", subItem.getString("item"));
-                        task.put("prep_time", subItem.getInt("prep_time"));
-                        task.put("is_takeout", isTakeout);
-                        expanded.put(task);
-                        System.out.println("  ├─ " + subItem.getString("item") + 
-                                         " (" + subItem.getInt("prep_time") + "s)");
-                    }
-                } else {
-                    // 不是套餐，直接加入
-                    expanded.put(order);
-                }
-            } catch (Exception e) {
-                System.out.println("查詢套餐失敗: " + e.getMessage() + ", 當作單項處理");
-                // 查詢失敗，當作單項處理
-                expanded.put(order);
-            }
-        }
-        
-        return expanded;
-    }
+    // ✗ expandCombos() 已廢棄 - 改由 processOrders() 和 scheduler 負責
 
     private void startProductionLine() {
         new Thread(() -> {
@@ -515,6 +557,7 @@ public class KitchenGUI {
         int seconds = task.getInt("prep_time");
         int id = task.getInt("id");
         boolean isTakeout = task.optBoolean("is_takeout", false);
+        boolean isPackTask = task.optBoolean("is_pack_task", false);
 
         JProgressBar bar = new JProgressBar(0, seconds);
         bar.setStringPainted(true);
@@ -565,11 +608,41 @@ public class KitchenGUI {
             }
             prodPanel.revalidate();
             prodPanel.repaint();
-            String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-            String record = "[" + time + "] OK " + name + " (#" + id + ") 完成";
-            addHistoryRecord(record);
+            
+            // 只在「訂單全部完成」時才顯示通知
+            boolean orderCompleted = checkAndMarkTaskComplete(id, name);
+            
+            if (orderCompleted) {
+                // 訂單全部完成！顯示完成通知
+                String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+                String orderName = orderRegistry.get(id).getString("name");
+                String record = "[" + time + "] ✅ 訂單 #" + id + " 完成: " + orderName;
+                addHistoryRecord(record);
+                
+                // 移除訂單登記
+                orderRegistry.remove(id);
+            }
+            
             updateScheduleDisplay(new JSONArray(latestResp));
         });
+    }
+    
+    /**
+     * 檢查並標記任務完成。
+     * 當訂單的所有任務都完成時，返回 true
+     */
+    private boolean checkAndMarkTaskComplete(int orderId, String taskName) {
+        if (!orderRegistry.containsKey(orderId)) {
+            return false;
+        }
+        
+        JSONObject orderInfo = orderRegistry.get(orderId);
+        int remaining = orderInfo.getInt("remaining_tasks") - 1;
+        orderInfo.put("remaining_tasks", remaining);
+        
+        System.out.println("  ✓ 訂單 #" + orderId + " 完成任務 '" + taskName + "' (剩餘 " + remaining + "/" + orderInfo.getInt("total_tasks") + ")");
+        
+        return remaining <= 0;
     }
 
     private void addHistoryRecord(String record) {

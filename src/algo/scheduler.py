@@ -3,34 +3,78 @@ import socket
 
 class McOSScheduler:
     def __init__(self):
-        # 這是全域隊列，存儲所有「尚未完成」的訂單
+        # 廚房排隊（可拆散的任務列表）
         self.pending_queue = []
         
-        # 用來追蹤每個 ID 的原始內容，判斷是否全部完成
-        # 格式: { order_id: { "remaining_count": int, "is_takeout": bool } }
+        # 訂單層級追蹤（不拆散）
+        # 格式: { order_id: { "name": "套餐名", "items": [...], "remaining_tasks": int, 
+        #                      "is_takeout": bool, "total_prep_time": int } }
         self.order_tracker = {}
 
     def optimize_schedule(self, new_orders):
         """
-        核心演算法區：批次優化、外帶打包
-        注意：套餐拆解由 GUI 負責，傳進來的都是單項任務
+        接收訂單（可能是套餐或單項）
+        支持同一個 order_id 對應多個 items（一次送出的批量訂單）
         """
-        processed_list = []
-        
+        # 先按 order_id 分組
+        orders_by_id = {}
         for order in new_orders:
             order_id = order['id']
-            is_takeout = order.get('is_takeout', False)
+            if order_id not in orders_by_id:
+                orders_by_id[order_id] = {
+                    'is_takeout': order.get('is_takeout', False),
+                    'items': [],
+                    'names': []
+                }
             
-            # 初始化追蹤器 (如果這個 ID 還沒被紀錄過)
-            if order_id not in self.order_tracker:
-                self.order_tracker[order_id] = {"remaining_count": 0, "is_takeout": is_takeout}
-
-            # GUI 已拆解套餐，這裡直接加入隊列
-            order["is_pack_task"] = False
-            processed_list.append(order)
-            self.order_tracker[order_id]["remaining_count"] += 1
-
-        self.pending_queue.extend(processed_list)
+            order_name = order.get('item', 'Unknown')
+            orders_by_id[order_id]['names'].append(order_name)
+            
+            # 判斷是否為套餐（有 items 欄位）
+            if 'items' in order:
+                # 套餐：多個 items
+                orders_by_id[order_id]['items'].extend(order['items'])
+            else:
+                # 單項：直接加入
+                orders_by_id[order_id]['items'].append({
+                    "item": order_name,
+                    "prep_time": order.get('prep_time', 5)
+                })
+        
+        # 現在處理分組後的訂單
+        for order_id, order_data in orders_by_id.items():
+            items = order_data['items']
+            is_takeout = order_data['is_takeout']
+            
+            # 組合訂單名稱（所有項目名稱）
+            order_name = "、".join(order_data['names'])
+            
+            total_time = sum(item.get('prep_time', 0) for item in items)
+            task_count = len(items)
+            
+            # 註冊訂單
+            self.order_tracker[order_id] = {
+                "name": order_name,
+                "items": items,
+                "total_tasks": task_count,  # 總任務數
+                "remaining_tasks": task_count,  # 剩餘任務數
+                "is_takeout": is_takeout,
+                "total_prep_time": total_time
+            }
+            
+            # 內部拆散為任務加入排隊（用於廚房排程）
+            for idx, item in enumerate(items):
+                task = {
+                    "id": order_id,
+                    "order_name": order_name,
+                    "item": item.get('item', 'Unknown'),
+                    "prep_time": item.get('prep_time', 5),
+                    "is_takeout": is_takeout,
+                    "task_index": idx,
+                    "is_pack_task": False
+                }
+                self.pending_queue.append(task)
+        
         return self._reschedule()
 
     def _reschedule(self):
@@ -61,45 +105,52 @@ class McOSScheduler:
             
         return self.pending_queue
 
-    def remove_finished(self, task_id, task_item=None):
+    def remove_finished(self, order_id, task_item=None):
         """ 
-        當 Java 完成一個單項時呼叫。
-        支援兩種模式：
-        - 傳入 task_id + task_item：精確移除單項任務（套餐模式）
-        - 僅傳入 task_id：移除該訂單所有項目（簡單模式）
+        當完成一個任務時呼叫。
+        邏輯：
+        1. 先刪除該任務
+        2. 遞減 remaining_tasks
+        3. 當 remaining_tasks = 0 時，整個訂單完成
+           - 外帶 → 加打包任務
+           - 完成 → 返回完成訊號（含完整訂單資訊）
         """
-        found = False
         
-        if task_item is not None:
-            # 精確模式：移除特定項目
-            for i, o in enumerate(self.pending_queue):
-                if o.get('id') == task_id and o.get('item') == task_item:
-                    self.pending_queue.pop(i)
-                    found = True
-                    break
+        if order_id not in self.order_tracker:
+            return self._reschedule()
+        
+        # 移除該任務
+        removed_count = 0
+        for i in range(len(self.pending_queue) - 1, -1, -1):
+            task = self.pending_queue[i]
+            if task.get('id') == order_id and (task_item is None or task.get('item') == task_item):
+                self.pending_queue.pop(i)
+                removed_count += 1
+                break  # 只移除一個
+        
+        if removed_count > 0:
+            # 遞減任務計數
+            self.order_tracker[order_id]["remaining_tasks"] -= 1
             
-            if found and task_id in self.order_tracker:
-                self.order_tracker[task_id]["remaining_count"] -= 1
+            # 檢查訂單是否全部完成
+            if self.order_tracker[order_id]["remaining_tasks"] <= 0:
+                order_info = self.order_tracker[order_id]
                 
-                # 套餐/外帶打包邏輯
-                if self.order_tracker[task_id]["remaining_count"] == 0:
-                    if self.order_tracker[task_id]["is_takeout"]:
-                        pack_task = {
-                            "id": task_id,
-                            "item": "🥡 打包裝袋",
-                            "prep_time": 4,
-                            "is_takeout": True,
-                            "is_pack_task": True
-                        }
-                        self.pending_queue.insert(0, pack_task)
-                        del self.order_tracker[task_id]
-                    else:
-                        del self.order_tracker[task_id]
-        else:
-            # 簡單模式：移除訂單的所有項目
-            self.pending_queue = [o for o in self.pending_queue if o.get('id') != task_id]
-            if task_id in self.order_tracker:
-                del self.order_tracker[task_id]
+                # 外帶訂單 → 加打包任務
+                if order_info.get("is_takeout", False):
+                    pack_task = {
+                        "id": order_id,
+                        "order_name": order_info["name"],
+                        "item": "🥡 打包裝袋",
+                        "prep_time": 4,
+                        "is_takeout": True,
+                        "is_pack_task": True,
+                        "task_index": 999
+                    }
+                    self.pending_queue.insert(0, pack_task)
+                else:
+                    # 內用訂單 → 直接完成
+                    del self.order_tracker[order_id]
         
         return self._reschedule()
 
