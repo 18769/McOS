@@ -31,6 +31,7 @@ public class KitchenGUI {
     private ArrayList<JSONObject> orderBuffer = new ArrayList<>();
     private LinkedList<String> historyList = new LinkedList<>();
     private LinkedHashMap<String, Integer> mealPrepTimes = new LinkedHashMap<>();
+    private LinkedHashMap<String, String> combos = new LinkedHashMap<>();  // <combo_name, food_items>
     private boolean isProductionRunning = false;
     private int orderIdCounter = 1;
     private boolean isScriptRunning = false;
@@ -45,6 +46,7 @@ public class KitchenGUI {
 
     public KitchenGUI() {
         loadMeals(); // 載入餐點資料庫
+        loadCombos(); // 載入套餐資料庫
 
         // --- 1. 全域外觀設定 ---
         frame = new JFrame("McOS 智慧廚房 - 專業出餐系統");
@@ -111,17 +113,65 @@ public class KitchenGUI {
         JPanel menuSection = createSectionPanel("點餐選項");
         menuSection.setPreferredSize(new Dimension(300, 0));
 
-        JPanel gridPanel = new JPanel(new GridLayout(0, 2, 10, 10)); // 2欄網格，無限列
-        gridPanel.setBackground(PANEL_BG);
-        gridPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        // 改用 BoxLayout 垂直排列，方便分組
+        JPanel menuContentPanel = new JPanel();
+        menuContentPanel.setLayout(new BoxLayout(menuContentPanel, BoxLayout.Y_AXIS));
+        menuContentPanel.setBackground(PANEL_BG);
+        menuContentPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        // 添加入網格的餐點 (從 meal.json 動態生成)
-        for (Map.Entry<String, Integer> entry : mealPrepTimes.entrySet()) {
-            addMenuButton(gridPanel, entry.getKey(), entry.getValue());
+        // ===== 套餐區 (Combo Section) =====
+        if (!combos.isEmpty()) {
+            JLabel comboLabel = new JLabel("🍱 套 餐");
+            comboLabel.setForeground(ACCENT_GOLD);
+            comboLabel.setFont(new Font("Microsoft JhengHei", Font.BOLD, 13));
+            comboLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            menuContentPanel.add(comboLabel);
+            menuContentPanel.add(Box.createVerticalStrut(8));
+            
+            JPanel comboGridPanel = new JPanel(new GridLayout(0, 2, 10, 10));
+            comboGridPanel.setBackground(PANEL_BG);
+            comboGridPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            
+            for (String comboName : combos.keySet()) {
+                addMenuButton(comboGridPanel, comboName, 0);
+            }
+            menuContentPanel.add(comboGridPanel);
+            menuContentPanel.add(Box.createVerticalStrut(15));
         }
 
+        // ===== 分隔線 =====
+        if (!combos.isEmpty() && !mealPrepTimes.isEmpty()) {
+            JSeparator sep = new JSeparator();
+            sep.setForeground(BORDER_COLOR);
+            sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+            menuContentPanel.add(sep);
+            menuContentPanel.add(Box.createVerticalStrut(15));
+        }
+
+        // ===== 餐點區 (Meal Section) =====
+        if (!mealPrepTimes.isEmpty()) {
+            JLabel mealLabel = new JLabel("🍔 餐 點");
+            mealLabel.setForeground(new Color(100, 200, 150));
+            mealLabel.setFont(new Font("Microsoft JhengHei", Font.BOLD, 13));
+            mealLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            menuContentPanel.add(mealLabel);
+            menuContentPanel.add(Box.createVerticalStrut(8));
+            
+            JPanel mealGridPanel = new JPanel(new GridLayout(0, 2, 10, 10));
+            mealGridPanel.setBackground(PANEL_BG);
+            mealGridPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            
+            for (Map.Entry<String, Integer> entry : mealPrepTimes.entrySet()) {
+                addMenuButton(mealGridPanel, entry.getKey(), entry.getValue());
+            }
+            menuContentPanel.add(mealGridPanel);
+        }
+
+        // 確保內容不為空時加入最後的垂直填充
+        menuContentPanel.add(Box.createVerticalGlue());
+
         // 隱藏滾動條維持乾淨外觀
-        JScrollPane menuScroll = new JScrollPane(gridPanel);
+        JScrollPane menuScroll = new JScrollPane(menuContentPanel);
         menuScroll.setBorder(null);
         menuScroll.getVerticalScrollBar().setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
             @Override
@@ -332,6 +382,25 @@ public class KitchenGUI {
         }
     }
 
+    private void loadCombos() {
+        try {
+            // 從資料庫讀取套餐資料
+            JSONArray combosArray = DBHelper.queryCombos();
+            System.out.println("=== 套餐資料調試 ===");
+            for (int i = 0; i < combosArray.length(); i++) {
+                JSONObject c = combosArray.getJSONObject(i);
+                String comboName = c.getString("combo_name");
+                String foodItems = c.getString("food_items");
+                System.out.println("  套餐: " + comboName + " | 食材: " + foodItems);
+                combos.put(comboName, foodItems);
+            }
+            System.out.println("從資料庫成功載入 " + combosArray.length() + " 個套餐\n");
+        } catch (Exception e) {
+            System.err.println("讀取套餐失敗: " + e.getMessage());
+            // 不使用預設套餐，因為套餐應該從資料庫讀取
+        }
+    }
+
     private void addOrderToBuffer(String item, int prepTime, int count, boolean isTakeout) {
         if (prepTime <= 0) {
             prepTime = getDefaultPrepTime(item);
@@ -366,15 +435,63 @@ public class KitchenGUI {
     private void processOrders() {
         if (orderBuffer.isEmpty())
             return;
+        
+        // 解析套餐：將套餐拆成單項任務
+        JSONArray expandedOrders = expandCombos(new JSONArray(orderBuffer));
+        
         JSONObject payload = new JSONObject();
         payload.put("type", "ADD_ORDER");
-        payload.put("data", new JSONArray(orderBuffer));
+        payload.put("data", expandedOrders);
         String response = sendToPython(payload.toString());
         orderBuffer.clear();
         updateWaitPanel();
         updateScheduleDisplay(new JSONArray(response));
         if (!isProductionRunning)
             startProductionLine();
+    }
+    
+    /**
+     * 將訂單中的套餐拆解成單項任務
+     */
+    private JSONArray expandCombos(JSONArray orders) {
+        JSONArray expanded = new JSONArray();
+        
+        for (int i = 0; i < orders.length(); i++) {
+            JSONObject order = orders.getJSONObject(i);
+            String itemName = order.getString("item");
+            int orderId = order.getInt("id");
+            boolean isTakeout = order.optBoolean("is_takeout", false);
+            
+            try {
+                // 嘗試從資料庫查詢此名稱是否為套餐
+                JSONArray comboItems = DBHelper.getComboItems(itemName);
+                
+                if (comboItems.length() > 0) {
+                    // 是套餐，拆解成子項目
+                    System.out.println("→ 拆解套餐: " + itemName);
+                    for (int j = 0; j < comboItems.length(); j++) {
+                        JSONObject subItem = comboItems.getJSONObject(j);
+                        JSONObject task = new JSONObject();
+                        task.put("id", orderId);
+                        task.put("item", subItem.getString("item"));
+                        task.put("prep_time", subItem.getInt("prep_time"));
+                        task.put("is_takeout", isTakeout);
+                        expanded.put(task);
+                        System.out.println("  ├─ " + subItem.getString("item") + 
+                                         " (" + subItem.getInt("prep_time") + "s)");
+                    }
+                } else {
+                    // 不是套餐，直接加入
+                    expanded.put(order);
+                }
+            } catch (Exception e) {
+                System.out.println("查詢套餐失敗: " + e.getMessage() + ", 當作單項處理");
+                // 查詢失敗，當作單項處理
+                expanded.put(order);
+            }
+        }
+        
+        return expanded;
     }
 
     private void startProductionLine() {
