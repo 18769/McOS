@@ -38,8 +38,10 @@ if not exist "%PYTHON_PATH%" (
 :: 編譯 Java 程式碼
 echo [1/3] 編譯 Java 程式碼...
 if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
-cd "%SRC_DIR%"
-javac -encoding UTF-8 -cp "%LIB_DIR%\json-20240303.jar" -d "%BIN_DIR%" db\DBHelper.java gui\KitchenGUI.java
+
+pushd "%SRC_DIR%\gui"
+javac -encoding UTF-8 -cp "%LIB_DIR%\json-20240303.jar;%BIN_DIR%" -d "%BIN_DIR%" *.java
+popd
 
 if !errorlevel! neq 0 (
     echo ✗ Java 編譯失敗！
