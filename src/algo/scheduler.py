@@ -78,31 +78,39 @@ class McOSScheduler:
         return self._reschedule()
 
     def _reschedule(self):
-        """ 統一處理排序與預計時間計算 """
-        # 排序權重：1. 外帶優先 2. 同品項合併 (Batching) 3. ID 順序
-        self.pending_queue.sort(key=lambda x: (
-            not x.get('is_takeout', False), 
-            x['item'], 
-            x['id']
-        ))
+        """ 統一處理排序與預計時間計算（整包與包內皆採最短作業優先）"""
+        # 1) 先按 order_id 分組，計算整包總時間（Shortest Total Processing Time）
+        order_groups = {}
+        for task in self.pending_queue:
+            base_time = task.get('base_prep_time', task.get('prep_time', 5))
+            task['base_prep_time'] = base_time
 
+            group = order_groups.setdefault(task['id'], {"tasks": [], "total": 0})
+            group["tasks"].append(task)
+            group["total"] += base_time
+
+        # 2) 依整包總時間排序（同分以 id 穩定排序）
+        ordered_groups = sorted(order_groups.items(), key=lambda x: (x[1]["total"], x[0]))
+
+        # 3) 包內再以最短任務時間排序（同分以 task_index 保持穩定）
+        new_queue = []
+        for _, group in ordered_groups:
+            group_tasks = sorted(
+                group["tasks"],
+                key=lambda t: (t["base_prep_time"], t.get("task_index", 0))
+            )
+            new_queue.extend(group_tasks)
+
+        self.pending_queue = new_queue
+
+        # 4) 重新計算每個任務的預計完成時間
         current_time = 0
-        last_item = None
-        for order in self.pending_queue:
-            base_time = order.get('base_prep_time', order['prep_time'])
-            order['base_prep_time'] = base_time
-            
-            # 批次優化邏輯：同品項連續製作時可降速 (70%)
-            if last_item is not None and order['item'] == last_item and not order.get('is_pack_task'):
-                actual_time = max(1, int(base_time * 0.7))
-            else:
-                actual_time = base_time
-            
-            order['prep_time'] = actual_time
+        for task in self.pending_queue:
+            actual_time = task.get('base_prep_time', task.get('prep_time', 5))
+            task['prep_time'] = actual_time
             current_time += actual_time
-            order['expected_at'] = current_time
-            last_item = order['item']
-            
+            task['expected_at'] = current_time
+
         return self.pending_queue
 
     def remove_finished(self, order_id, task_item=None):
