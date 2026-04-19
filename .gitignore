@@ -5,3 +5,4 @@ product/
 /DB/
 /bin
 /docs/
+bin/db/DBHelper.class

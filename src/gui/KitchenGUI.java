@@ -21,7 +21,7 @@ import db.DBHelper;
 
 public class KitchenGUI {
     private JButton scriptBtn;
-    private Thread scriptThread = null; // 用來保存當前執行的執行緒
+    private scripting scriptingManager;
 
     private JFrame frame;
     private JPanel waitPanel, prodPanel;
@@ -35,7 +35,6 @@ public class KitchenGUI {
     private LinkedHashMap<Integer, JSONObject> orderRegistry = new LinkedHashMap<>();  // 訂單登記簿：order_id -> {name, total_tasks, remaining_tasks}
     private boolean isProductionRunning = false;
     private int orderIdCounter = 1;
-    private boolean isScriptRunning = false;
 
     // --- Modern Theme Colors ---
     private static final Color BG_DARK = new Color(24, 24, 27); // zinc-900
@@ -83,13 +82,8 @@ public class KitchenGUI {
         actionPanel.add(takeoutBox);
 
         scriptBtn = createFlatButton("📂 載入腳本", new Color(0, 120, 215), Color.WHITE);
-        scriptBtn.addActionListener(e -> {
-            if (!isScriptRunning) {
-                openScriptFileChooser(); // 傳入按鈕
-            } else {
-                executeScriptFile(null, scriptBtn); // 傳入 null File 觸發中斷判斷
-            }
-        });
+        scriptingManager = new scripting(this, frame, scriptBtn, statusLabel, takeoutBox);
+        scriptBtn.addActionListener(e -> scriptingManager.handleScriptButton());
         actionPanel.add(scriptBtn);
 
         JButton clearBtn = createFlatButton("🗑️ 清空暫存", new Color(220, 53, 69), Color.WHITE);
@@ -402,7 +396,7 @@ public class KitchenGUI {
         }
     }
 
-    private void addOrderToBuffer(String item, int prepTime, int count, boolean isTakeout) {
+    void addOrderToBuffer(String item, int prepTime, int count, boolean isTakeout) {
         if (prepTime <= 0) {
             prepTime = getDefaultPrepTime(item);
         }
@@ -417,7 +411,7 @@ public class KitchenGUI {
         updateWaitPanel();
     }
 
-    private void updateWaitPanel() {
+    void updateWaitPanel() {
         waitPanel.removeAll();
         for (JSONObject o : orderBuffer) {
             boolean isTakeout = o.optBoolean("is_takeout", false);
@@ -433,7 +427,7 @@ public class KitchenGUI {
         waitPanel.repaint();
     }
 
-    private void processOrders() {
+    void processOrders() {
         if (orderBuffer.isEmpty())
             return;
         
@@ -743,134 +737,7 @@ public class KitchenGUI {
         return section;
     }
 
-    private void openScriptFileChooser() {
-        JFileChooser chooser = new JFileChooser(new File("./scripts"));
-        chooser.setDialogTitle("選擇 JSON 測試腳本");
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("JSON 腳本檔", "json"));
-        if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
-            File file = chooser.getSelectedFile();
-            executeScriptFile(file, this.scriptBtn);
-        }
-    }
-
-    private void executeScriptFile(File file, JButton targetBtn) {
-        if (isScriptRunning) {
-            if (scriptThread != null) {
-                scriptThread.interrupt();
-                SwingUtilities.invokeLater(() -> showAutoCloseMsg("腳本已中斷", 2000));
-            }
-            return;
-        }
-        isScriptRunning = true;
-
-        SwingUtilities.invokeLater(() -> {
-            targetBtn.setText("🛑 中斷腳本");
-            targetBtn.putClientProperty("baseBg", new Color(220, 53, 69));
-            targetBtn.setBackground(new Color(220, 53, 69)); // 轉為紅色
-        });
-
-        scriptThread = new Thread(() -> {
-            try {
-                String content = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
-                JSONObject script = new JSONObject(content);
-                JSONArray steps = script.getJSONArray("steps");
-
-                SwingUtilities.invokeLater(() -> showAutoCloseMsg("腳本即將開始...", 2000));
-                Thread.sleep(2000);
-
-                SwingUtilities.invokeLater(() -> statusLabel.setText("● 系統狀態: 腳本執行中"));
-                executeSteps(steps);
-
-                SwingUtilities.invokeLater(() -> showAutoCloseMsg("腳本執行結束！", 2000));
-                SwingUtilities.invokeLater(() -> statusLabel.setText("● 系統狀態: 腳本已完成"));
-                Thread.sleep(2000);
-
-            } catch (InterruptedException ex) {
-                // 當 thread.interrupt() 被呼叫時，Thread.sleep 會拋出此異常
-                SwingUtilities.invokeLater(() -> historyArea.append("⚠️ 腳本已被使用者強制中斷\n"));
-            } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame, "腳本解析錯誤: " + ex.getMessage(),
-                        "錯誤", JOptionPane.ERROR_MESSAGE));
-            } finally {
-                scriptThread = null;
-                isScriptRunning = false;
-                SwingUtilities.invokeLater(() -> {
-                    targetBtn.setText("📂 載入腳本");
-                    targetBtn.putClientProperty("baseBg", new Color(0, 120, 215));
-                    targetBtn.setBackground(new Color(0, 120, 215)); // 恢復藍色
-                    statusLabel.setText("● 系統狀態: 待機中");
-                });
-            }
-        });
-        scriptThread.start();
-    }
-
-    private void showAutoCloseMsg(String msg, int delayMs) {
-        JDialog dialog = new JDialog(frame, "系統提示", false);
-        JOptionPane opt = new JOptionPane(msg, JOptionPane.INFORMATION_MESSAGE, JOptionPane.DEFAULT_OPTION, null,
-                new Object[] {}, null);
-        dialog.setContentPane(opt);
-        dialog.pack();
-        dialog.setLocationRelativeTo(frame);
-
-        javax.swing.Timer timer = new javax.swing.Timer(delayMs, e -> dialog.dispose());
-        timer.setRepeats(false);
-        timer.start();
-
-        dialog.setVisible(true);
-    }
-
-    // 腳本系統
-    private void executeSteps(JSONArray steps) throws Exception {
-        for (int i = 0; i < steps.length(); i++) {
-            if (Thread.currentThread().isInterrupted()) {
-                throw new InterruptedException("User requested stop");
-            }
-
-            JSONObject step = steps.getJSONObject(i);
-            String action = step.optString("action", "");
-
-            switch (action) {
-                case "SET_MODE":
-                    boolean isTakeout = step.optBoolean("takeout", false);
-                    SwingUtilities.invokeAndWait(() -> takeoutBox.setSelected(isTakeout));
-                    break;
-                case "ADD_ORDER":
-                    String item = step.getString("item");
-                    int prepTime = step.optInt("prep_time", 0);
-                    int count = step.optInt("count", 1);
-                    SwingUtilities.invokeAndWait(() -> {
-                        addOrderToBuffer(item, prepTime, count, takeoutBox.isSelected());
-                    });
-                    break;
-                case "SEND_ORDERS":
-                    SwingUtilities.invokeAndWait(this::processOrders);
-                    break;
-                case "CLEAR_BUFFER":
-                    SwingUtilities.invokeAndWait(() -> {
-                        orderBuffer.clear();
-                        updateWaitPanel();
-                    });
-                    break;
-                case "WAIT":
-                    int seconds = step.optInt("seconds", 1);
-                    Thread.sleep(seconds * 1000L);
-                    break;
-                case "REPEAT":
-                    int times = step.optInt("times", 1);
-                    JSONArray subSteps = step.optJSONArray("steps");
-                    if (subSteps != null) {
-                        for (int t = 0; t < times; t++) {
-                            executeSteps(subSteps);
-                        }
-                    }
-                    break;
-                default:
-                    System.out.println("未知腳本指令: " + action);
-            }
-            Thread.sleep(200); // 讓連續動畫不會太快閃現
-        }
-    }
+    // 腳本系統已搬到 gui.scripting
 
     private String sendToPython(String payload) {
         try (Socket s = new Socket()) {
@@ -914,5 +781,14 @@ public class KitchenGUI {
         // 設定 Swing 去除預設樣式以達到扁平化
         UIManager.put("Button.select", BORDER_COLOR);
         SwingUtilities.invokeLater(KitchenGUI::new);
+    }
+
+    void clearOrderBuffer() {
+        orderBuffer.clear();
+        updateWaitPanel();
+    }
+
+    void appendHistoryMessage(String msg) {
+        historyArea.append(msg);
     }
 }
