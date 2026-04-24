@@ -15,7 +15,7 @@
 
 ### 前置條件
 - Windows 10+
-- JDK 11+ (java 和 javac 在 PATH 中)
+- JDK 26.0.1+ (java 和 javac 在 PATH 中)
 - 網絡連接到學校伺服器
 
 ### 運行方式

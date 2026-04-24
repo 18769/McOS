@@ -9,7 +9,9 @@ set "SRC_DIR=%PROJECT_ROOT%src"
 set "BIN_DIR=%PROJECT_ROOT%bin"
 set "LIB_DIR=%PROJECT_ROOT%lib"
 set "ENV_DIR=%PROJECT_ROOT%env"
-set "JRE_PATH=%ENV_DIR%\jre\bin\java.exe"
+set "JDK_DIR=%ENV_DIR%\jdk"
+set "JAVA_PATH=%JDK_DIR%\bin\java.exe"
+set "JAVAC_PATH=%JDK_DIR%\bin\javac.exe"
 set "PYTHON_PATH=%ENV_DIR%\python_env\python.exe"
 set "CLASSPATH=%BIN_DIR%;%LIB_DIR%\json-20240303.jar"
 
@@ -19,10 +21,19 @@ echo    McOS 智慧廚房 - 示範模式啟動中...
 echo ==========================================
 echo.
 
-:: 檢查 JRE 是否存在
-if not exist "%JRE_PATH%" (
-    echo ✗ 錯誤：專案內的 JRE 不存在！
-    echo 路徑：%JRE_PATH%
+
+:: 檢查 JDK 是否存在
+if not exist "%JAVA_PATH%" (
+    echo ERROR: JDK java not found
+    echo Path: %JAVA_PATH%
+    pause
+    exit /b 1
+)
+
+:: 檢查 JDK (javac) 是否存在
+if not exist "%JAVAC_PATH%" (
+    echo ERROR: JDK javac not found
+    echo Path: %JAVAC_PATH%
     pause
     exit /b 1
 )
@@ -36,11 +47,11 @@ if not exist "%PYTHON_PATH%" (
 )
 
 :: 編譯 Java 程式碼
-echo [1/3] 編譯 Java 程式碼...
+echo [1/3] Compile Java sources...
 if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 
-pushd "%SRC_DIR%\gui"
-javac -encoding UTF-8 -cp "%LIB_DIR%\json-20240303.jar;%BIN_DIR%" -d "%BIN_DIR%" *.java
+pushd "%SRC_DIR%"
+"%JAVAC_PATH%" -encoding UTF-8 -cp "%LIB_DIR%\json-20240303.jar;%BIN_DIR%" -d "%BIN_DIR%" db\*.java gui\*.java
 popd
 
 if !errorlevel! neq 0 (
@@ -67,7 +78,7 @@ timeout /t 2 /nobreak >nul
 echo [4/4] 啟動 Java GUI 前端...
 echo ==========================================
 cd "%PROJECT_ROOT%"
-"%JRE_PATH%" -cp "%CLASSPATH%" gui.KitchenGUI
+"%JAVA_PATH%" -cp "%CLASSPATH%" gui.KitchenGUI
 
 echo.
 echo 系統已關閉。

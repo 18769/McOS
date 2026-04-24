@@ -3,6 +3,5 @@ data/
 McOS_envPackage/
 product/
 /DB/
-/bin
+/bin/
 /docs/
-bin/db/DBHelper.class
