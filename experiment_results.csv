@@ -1,0 +1,6 @@
+OrderID,Item,Algo,WaitTime,TurnaroundTime
+1,雞塊,sjf_logic,1.05,6.05
+3,小麥克,sjf_logic,7.08,13.08
+1,麥克,sjf_logic,14.19,21.19
+1,大麥克,sjf_logic,22.25,30.25
+2,大麥克,sjf_logic,31.34,39.34
