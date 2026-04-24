@@ -1,5 +1,30 @@
 import time
 
+try:
+    from algo.scheduler import McOSScheduler
+except Exception:
+    McOSScheduler = None
+
+_scheduler_instance = None
+
+
+def get_scheduler():
+    """取得共享的 McOSScheduler 實例（若可用）。"""
+    global _scheduler_instance
+    if McOSScheduler is None:
+        return None
+    if _scheduler_instance is None:
+        _scheduler_instance = McOSScheduler()
+    return _scheduler_instance
+
+
+def mcosscheduler_logic(orders, **kwargs):
+    """透過 src/algo/scheduler.py 的 McOSScheduler 進行排程。"""
+    scheduler = get_scheduler()
+    if scheduler is None:
+        raise RuntimeError("McOSScheduler is not available. Check src/algo/scheduler.py import.")
+    return scheduler.optimize_schedule(orders)
+
 # 1. FCFS: 依照 ID 排序
 def fcfs_logic(tasks, **kwargs):
     return sorted(tasks, key=lambda x: x['id'])

@@ -1,6 +1,6 @@
 OrderID,Item,Algo,WaitTime,TurnaroundTime
-1,雞塊,sjf_logic,1.05,6.05
-3,小麥克,sjf_logic,7.08,13.08
-1,麥克,sjf_logic,14.19,21.19
-1,大麥克,sjf_logic,22.25,30.25
-2,大麥克,sjf_logic,31.34,39.34
+1,冰可樂(中),sjf_logic,1.02,31.02
+4,可樂,sjf_logic,19.53,20.53
+4,玉米湯,sjf_logic,21.55,23.55
+2,薯條,sjf_logic,35.37,38.37
+3,薯條,fcfs_logic,35.46,38.46

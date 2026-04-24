@@ -24,8 +24,8 @@ echo [2/5] 編譯 Java 程式碼...
 if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 
 :: 修正點：使用 pushd 進入資料夾，避免在引號路徑中使用 *
-pushd "%SRC_DIR%\gui"
-javac -encoding UTF-8 -cp "%JAR_PATH%;%BIN_DIR%" -d "%BIN_DIR%" *.java
+pushd "%SRC_DIR%"
+javac -encoding UTF-8 -cp "%JAR_PATH%;%BIN_DIR%" -d "%BIN_DIR%" db\*.java gui\*.java
 popd
 
 if !errorlevel! neq 0 (

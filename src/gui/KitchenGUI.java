@@ -27,6 +27,7 @@ public class KitchenGUI {
     private JPanel waitPanel, prodPanel;
     private JTextArea scheduleArea, historyArea;
     private JCheckBox takeoutBox;
+    private JComboBox<String> algoSelector;
     private JLabel statusLabel;
     private ArrayList<JSONObject> orderBuffer = new ArrayList<>();
     private LinkedList<String> historyList = new LinkedList<>();
@@ -74,7 +75,20 @@ public class KitchenGUI {
         statusLabel.setFont(new Font("Microsoft JhengHei", Font.PLAIN, 14));
         actionPanel.add(statusLabel);
 
-        takeoutBox = new JCheckBox("外帶模式");
+    JLabel algoLabel = new JLabel("排程策略:");
+    algoLabel.setForeground(TEXT_SECONDARY);
+    algoLabel.setFont(new Font("Microsoft JhengHei", Font.BOLD, 13));
+    actionPanel.add(algoLabel);
+
+    algoSelector = new JComboBox<>(new String[]{"FCFS", "SJF", "AGING"});
+    algoSelector.setFont(new Font("Microsoft JhengHei", Font.BOLD, 13));
+    algoSelector.setBackground(PANEL_BG);
+    algoSelector.setForeground(TEXT_PRIMARY);
+    algoSelector.setFocusable(false);
+    algoSelector.addActionListener(e -> switchSchedulerMode((String) algoSelector.getSelectedItem()));
+    actionPanel.add(algoSelector);
+
+    takeoutBox = new JCheckBox("外帶模式");
         takeoutBox.setForeground(TEXT_PRIMARY);
         takeoutBox.setBackground(new Color(18, 18, 20));
         takeoutBox.setFont(new Font("Microsoft JhengHei", Font.BOLD, 15));
@@ -229,6 +243,7 @@ public class KitchenGUI {
 
         startAutoSaveTimer();
         startStatusChecker();
+        switchSchedulerMode((String) algoSelector.getSelectedItem());
     }
 
     private JButton createFlatButton(String text, Color bg, Color fg) {
@@ -664,6 +679,19 @@ public class KitchenGUI {
             }
             scheduleArea.setText(sb.toString());
         });
+    }
+
+    private void switchSchedulerMode(String mode) {
+        if (mode == null || mode.isBlank()) {
+            return;
+        }
+        JSONObject payload = new JSONObject();
+        payload.put("type", "SWITCH_MODE");
+        payload.put("mode", mode);
+        String response = sendToPython(payload.toString());
+        if (response != null && response.trim().startsWith("[")) {
+            updateScheduleDisplay(new JSONArray(response));
+        }
     }
 
     // --- Modern Component Creators ---
