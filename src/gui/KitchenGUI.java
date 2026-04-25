@@ -8,6 +8,8 @@ import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.io.*;
 import java.net.Socket;
@@ -17,7 +19,7 @@ import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import org.json.*;
-import db.DBHelper;
+import db.DBRequest;
 
 public class KitchenGUI {
     private JButton scriptBtn;
@@ -33,8 +35,22 @@ public class KitchenGUI {
     private LinkedList<String> historyList = new LinkedList<>();
     private LinkedHashMap<String, Integer> mealPrepTimes = new LinkedHashMap<>();
     private LinkedHashMap<String, String> combos = new LinkedHashMap<>();  // <combo_name, food_items>
+    private ArrayList<JSONObject> workers = new ArrayList<>();
+    private LinkedHashMap<Integer, String> workerNames = new LinkedHashMap<>();
+    private ArrayList<Integer> workerIds = new ArrayList<>();
+    private final HashSet<String> inProgressTasks = new HashSet<>();
+    private final Object inProgressLock = new Object();
+    private final LinkedHashMap<Integer, WorkerTaskState> activeWorkersState = new LinkedHashMap<>();
     private LinkedHashMap<Integer, JSONObject> orderRegistry = new LinkedHashMap<>();  // 訂單登記簿：order_id -> {name, total_tasks, remaining_tasks}
     private boolean isProductionRunning = false;
+
+    private static class WorkerTaskState {
+        JSONObject task;
+        int remaining;
+        JProgressBar bar;
+        JPanel wrapper;
+        String taskKey;
+    }
     private int orderIdCounter = 1;
 
     // --- Modern Theme Colors ---
@@ -46,8 +62,9 @@ public class KitchenGUI {
     private static final Color TEXT_SECONDARY = new Color(161, 161, 170); // zinc-400
 
     public KitchenGUI() {
-        loadMeals(); // 載入餐點資料庫
-        loadCombos(); // 載入套餐資料庫
+    mealPrepTimes = DBRequest.loadMeals(); // 載入餐點資料庫
+    combos = DBRequest.loadCombos(); // 載入套餐資料庫
+    applyWorkerRoster(DBRequest.loadWorkerRoster()); // 載入員工資料
 
         // --- 1. 全域外觀設定 ---
         frame = new JFrame("McOS 智慧廚房 - 專業出餐系統");
@@ -246,6 +263,23 @@ public class KitchenGUI {
         switchSchedulerMode((String) algoSelector.getSelectedItem());
     }
 
+    private void applyWorkerRoster(DBRequest.WorkerRoster roster) {
+        workers.clear();
+        workerNames.clear();
+        workerIds.clear();
+
+        if (roster != null) {
+            workers.addAll(roster.workers);
+            workerIds.addAll(roster.workerIds);
+            workerNames.putAll(roster.workerNames);
+        }
+
+        if (workerIds.isEmpty()) {
+            workerIds.add(1);
+            workerNames.put(1, "Worker 1");
+        }
+    }
+
     private JButton createFlatButton(String text, Color bg, Color fg) {
         JButton btn = new JButton(text);
         btn.setFont(new Font("Microsoft JhengHei", Font.BOLD, 14));
@@ -360,56 +394,6 @@ public class KitchenGUI {
         return mealPrepTimes.getOrDefault(item, 5);
     }
 
-    private void loadMeals() {
-        try {
-            // 從資料庫讀取餐點資料
-            JSONArray meals = DBHelper.queryMeals();
-            System.out.println("=== 餐點資料調試 ===");
-            for (int i = 0; i < meals.length(); i++) {
-                JSONObject m = meals.getJSONObject(i);
-                String mealName = m.getString("meal_name");
-                int prepTime = m.getInt("prep_time");
-                System.out.println("  餐點: " + mealName + " | 準備時間: " + prepTime);
-                mealPrepTimes.put(mealName, prepTime);
-            }
-            System.out.println("從資料庫成功載入 " + meals.length() + " 個餐點\n");
-        } catch (Exception e) {
-            System.err.println("讀取資料庫失敗，改用預設資料: " + e.getMessage());
-            e.printStackTrace();
-            // 預設資料備用
-            mealPrepTimes.put("大麥克", 8);
-            mealPrepTimes.put("小麥克", 6);
-            mealPrepTimes.put("麥克", 7);
-            mealPrepTimes.put("薯條", 3);
-            mealPrepTimes.put("雞塊", 5);
-            mealPrepTimes.put("蘋果派", 4);
-            mealPrepTimes.put("玉米湯", 2);
-            mealPrepTimes.put("可樂", 1);
-            mealPrepTimes.put("舊東洋熱狗", 5);
-            mealPrepTimes.put("冰美式", 3);
-            mealPrepTimes.put("大麥克預設", 0);
-            mealPrepTimes.put("雞塊特餐", 0);
-        }
-    }
-
-    private void loadCombos() {
-        try {
-            // 從資料庫讀取套餐資料
-            JSONArray combosArray = DBHelper.queryCombos();
-            System.out.println("=== 套餐資料調試 ===");
-            for (int i = 0; i < combosArray.length(); i++) {
-                JSONObject c = combosArray.getJSONObject(i);
-                String comboName = c.getString("combo_name");
-                String foodItems = c.getString("food_items");
-                System.out.println("  套餐: " + comboName + " | 食材: " + foodItems);
-                combos.put(comboName, foodItems);
-            }
-            System.out.println("從資料庫成功載入 " + combosArray.length() + " 個套餐\n");
-        } catch (Exception e) {
-            System.err.println("讀取套餐失敗: " + e.getMessage());
-            // 不使用預設套餐，因為套餐應該從資料庫讀取
-        }
-    }
 
     void addOrderToBuffer(String item, int prepTime, int count, boolean isTakeout) {
         if (prepTime <= 0) {
@@ -471,7 +455,7 @@ public class KitchenGUI {
             
             try {
                 // 嘗試查詢是否為套餐
-                JSONArray comboItems = DBHelper.getComboItems(itemName);
+                JSONArray comboItems = DBRequest.getComboItems(itemName);
                 
                 if (comboItems.length() > 0) {
                     // 是套餐
@@ -546,27 +530,109 @@ public class KitchenGUI {
     // ✗ expandCombos() 已廢棄 - 改由 processOrders() 和 scheduler 負責
 
     private void startProductionLine() {
-        new Thread(() -> {
-            isProductionRunning = true;
-            while (true) {
-                JSONObject request = new JSONObject();
-                request.put("type", "GET_STATUS");
-                String resp = sendToPython(request.toString());
-                JSONArray currentQueue = new JSONArray(resp);
-                if (currentQueue.length() == 0)
-                    break;
-                doWork(currentQueue.getJSONObject(0));
-            }
-            isProductionRunning = false;
-        }).start();
+        if (isProductionRunning) {
+            return;
+        }
+        isProductionRunning = true;
+        new Thread(this::runProductionLoop).start();
     }
 
-    private void doWork(JSONObject task) {
+    private void runProductionLoop() {
+        while (true) {
+            JSONArray currentQueue = fetchCurrentQueue();
+            for (int workerId : workerIds) {
+                WorkerTaskState state = activeWorkersState.get(workerId);
+                if (state == null) {
+                    JSONObject nextTask = pickTaskForWorker(workerId, currentQueue);
+                    if (nextTask != null) {
+                        state = startWorkerTask(workerId, nextTask);
+                        activeWorkersState.put(workerId, state);
+                    }
+                }
+            }
+
+            for (int workerId : new ArrayList<>(activeWorkersState.keySet())) {
+                WorkerTaskState state = activeWorkersState.get(workerId);
+                if (state == null) {
+                    continue;
+                }
+                state.remaining -= 1;
+                int progress = Math.max(0, state.task.getInt("prep_time") - state.remaining);
+                SwingUtilities.invokeLater(() -> state.bar.setValue(progress));
+
+                if (state.remaining <= 0) {
+                    finishWorkerTask(workerId, state);
+                    activeWorkersState.remove(workerId);
+                }
+            }
+
+            if (currentQueue.length() == 0 && activeWorkersState.isEmpty()) {
+                break;
+            }
+
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                break;
+            }
+        }
+
+        isProductionRunning = false;
+    }
+
+    private JSONArray fetchCurrentQueue() {
+        JSONObject request = new JSONObject();
+        request.put("type", "GET_STATUS");
+        String resp = sendToPython(request.toString());
+        return new JSONArray(resp);
+    }
+
+    private JSONObject pickTaskForWorker(int workerId, JSONArray currentQueue) {
+
+        JSONObject selected = null;
+        int bestExpected = Integer.MAX_VALUE;
+        for (int i = 0; i < currentQueue.length(); i++) {
+            JSONObject task = currentQueue.getJSONObject(i);
+            int taskWorker = task.optInt("worker_id", 1);
+            if (taskWorker != workerId) {
+                continue;
+            }
+            String key = buildTaskKey(task);
+            synchronized (inProgressLock) {
+                if (inProgressTasks.contains(key)) {
+                    continue;
+                }
+            }
+            int expected = task.optInt("expected_at", Integer.MAX_VALUE);
+            if (selected == null || expected < bestExpected) {
+                selected = task;
+                bestExpected = expected;
+            }
+        }
+
+        if (selected != null) {
+            String key = buildTaskKey(selected);
+            synchronized (inProgressLock) {
+                inProgressTasks.add(key);
+            }
+            selected.put("_task_key", key);
+        }
+        return selected;
+    }
+
+    private String buildTaskKey(JSONObject task) {
+        int id = task.optInt("id", -1);
+        String item = task.optString("item", "");
+        int index = task.optInt("task_index", -1);
+        boolean isPack = task.optBoolean("is_pack_task", false);
+        return id + "::" + item + "::" + index + "::" + isPack;
+    }
+
+    private WorkerTaskState startWorkerTask(int workerId, JSONObject task) {
         String name = task.getString("item");
         int seconds = task.getInt("prep_time");
         int id = task.getInt("id");
         boolean isTakeout = task.optBoolean("is_takeout", false);
-        boolean isPackTask = task.optBoolean("is_pack_task", false);
 
         JProgressBar bar = new JProgressBar(0, seconds);
         bar.setStringPainted(true);
@@ -574,66 +640,76 @@ public class KitchenGUI {
         bar.setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
         bar.setFont(new Font("Microsoft JhengHei", Font.BOLD, 13));
 
+        String typeLabel = isTakeout ? "外帶" : "內用";
+        String displayWorker = workerNames.getOrDefault(workerId, "Worker " + workerId);
         if (isTakeout) {
             bar.setForeground(new Color(255, 140, 0));
-            bar.setString("外帶: " + name + " (#" + id + ")");
         } else {
             bar.setForeground(new Color(34, 199, 100)); // lighter green flat
-            bar.setString("內用: " + name + " (#" + id + ")");
         }
+        bar.setString("員工: " + displayWorker + " | " + typeLabel + ": " + name + " (#" + id + ")");
+
+        JPanel barWrap = new JPanel(new BorderLayout());
+        barWrap.setBackground(PANEL_BG);
+        barWrap.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        barWrap.add(bar, BorderLayout.CENTER);
 
         SwingUtilities.invokeLater(() -> {
-            JPanel barWrap = new JPanel(new BorderLayout());
-            barWrap.setBackground(PANEL_BG);
-            barWrap.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-            barWrap.add(bar, BorderLayout.CENTER);
-
             prodPanel.add(barWrap);
             prodPanel.revalidate();
         });
 
-        for (int i = 0; i <= seconds; i++) {
-            final int current = i;
-            SwingUtilities.invokeLater(() -> bar.setValue(current));
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-            }
-        }
+        WorkerTaskState state = new WorkerTaskState();
+        state.task = task;
+        state.remaining = seconds;
+        state.bar = bar;
+        state.wrapper = barWrap;
+        state.taskKey = task.optString("_task_key", "");
+        return state;
+    }
+
+    private void finishWorkerTask(int workerId, WorkerTaskState state) {
+        JSONObject task = state.task;
+        String name = task.getString("item");
+        int id = task.getInt("id");
 
         JSONObject finishReq = new JSONObject();
         finishReq.put("type", "FINISH_ORDER");
         finishReq.put("order_id", id);
         finishReq.put("item", name);
-        String latestResp = sendToPython(finishReq.toString());
+    String latestResp = sendToPython(finishReq.toString());
 
         SwingUtilities.invokeLater(() -> {
-            // Remove the specific wrapper
-            for (Component comp : prodPanel.getComponents()) {
-                if (comp instanceof JPanel && ((JPanel) comp).getComponent(0) == bar) {
-                    prodPanel.remove(comp);
-                    break;
-                }
-            }
+            prodPanel.remove(state.wrapper);
             prodPanel.revalidate();
             prodPanel.repaint();
-            
-            // 只在「訂單全部完成」時才顯示通知
+
             boolean orderCompleted = checkAndMarkTaskComplete(id, name);
-            
             if (orderCompleted) {
-                // 訂單全部完成！顯示完成通知
                 String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
                 String orderName = orderRegistry.get(id).getString("name");
                 String record = "[" + time + "] ✅ 訂單 #" + id + " 完成: " + orderName;
                 addHistoryRecord(record);
-                
-                // 移除訂單登記
                 orderRegistry.remove(id);
             }
-            
-            updateScheduleDisplay(new JSONArray(latestResp));
+
+            if (latestResp != null && latestResp.trim().startsWith("[")) {
+                updateScheduleDisplay(new JSONArray(latestResp));
+            } else {
+                JSONObject request = new JSONObject();
+                request.put("type", "GET_STATUS");
+                String statusResp = sendToPython(request.toString());
+                if (statusResp != null && statusResp.trim().startsWith("[")) {
+                    updateScheduleDisplay(new JSONArray(statusResp));
+                }
+            }
         });
+
+        if (state.taskKey != null && !state.taskKey.isBlank()) {
+            synchronized (inProgressLock) {
+                inProgressTasks.remove(state.taskKey);
+            }
+        }
     }
     
     /**
@@ -669,13 +745,15 @@ public class KitchenGUI {
     private void updateScheduleDisplay(JSONArray schedule) {
         SwingUtilities.invokeLater(() -> {
             StringBuilder sb = new StringBuilder("=== 智慧排程 ===\n\n");
-            sb.append(String.format("%-4s | %-12s | %-5s | %-4s\n", "ID", "項目", "預計", "類型"));
-            sb.append("--------------------------------------\n");
+            sb.append(String.format("%-4s | %-12s | %-5s | %-4s | %-6s\n", "ID", "項目", "預計", "類型", "員工"));
+            sb.append("------------------------------------------------\n");
             for (int i = 0; i < schedule.length(); i++) {
                 JSONObject o = schedule.getJSONObject(i);
                 String type = o.optBoolean("is_takeout") ? "[外帶]" : "[內用]";
-                sb.append(String.format("[#%02d] %-12s | %3ds | %s\n",
-                        o.getInt("id"), o.getString("item"), o.getInt("expected_at"), type));
+                int workerId = o.optInt("worker_id", 0);
+                String workerLabel = workerId > 0 ? workerNames.getOrDefault(workerId, "W" + workerId) : "-";
+                sb.append(String.format("[#%02d] %-12s | %3ds | %s | %-6s\n",
+                        o.getInt("id"), o.getString("item"), o.getInt("expected_at"), type, workerLabel));
             }
             scheduleArea.setText(sb.toString());
         });

@@ -1,4 +1,6 @@
 import time
+import json
+from pathlib import Path
 import algorithms
 
 class McOSScheduler:
@@ -6,6 +8,20 @@ class McOSScheduler:
         self.pending_queue = []
         self.order_tracker = {}
         self.strategy = algorithms.fcfs_logic 
+        self.workers = self._load_workers()
+        self.worker_available = {worker_id: 0 for worker_id in self.workers}
+
+    def _load_workers(self):
+        worker_file = Path(__file__).resolve().parents[1] / "DB" / "worker.json"
+        try:
+            data = json.loads(worker_file.read_text(encoding="utf-8"))
+            worker_ids = [int(w.get("worker_id")) for w in data if "worker_id" in w]
+            worker_ids = [wid for wid in worker_ids if wid > 0]
+            if worker_ids:
+                return sorted(worker_ids)
+        except Exception:
+            pass
+        return [1]
 
     def set_strategy(self, mode):
         if mode == "SJF": self.strategy = algorithms.sjf_logic
@@ -47,10 +63,20 @@ class McOSScheduler:
 
     def _reschedule(self):
         self.pending_queue = self.strategy(self.pending_queue, current_time=time.time())
-        offset = 0
+
+        for worker_id in self.workers:
+            self.worker_available.setdefault(worker_id, 0)
+
         for t in self.pending_queue:
-            offset += t['prep_time']
-            t['expected_at'] = offset
+            prep_time = t['prep_time']
+            selected_worker = min(self.worker_available.items(), key=lambda x: (x[1], x[0]))[0]
+            start_time = self.worker_available[selected_worker]
+            finish_time = start_time + prep_time
+
+            t['worker_id'] = selected_worker
+            t['expected_at'] = finish_time
+            self.worker_available[selected_worker] = finish_time
+
         return self.pending_queue
 
     def remove_finished(self, order_id, item_name):

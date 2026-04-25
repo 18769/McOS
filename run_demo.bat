@@ -47,7 +47,7 @@ if not exist "%PYTHON_PATH%" (
 )
 
 :: 編譯 Java 程式碼
-echo [1/3] Compile Java sources...
+echo [1/3] Compile Java sources (db + gui)...
 if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 
 pushd "%SRC_DIR%"

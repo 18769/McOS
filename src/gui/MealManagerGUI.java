@@ -1,6 +1,6 @@
 package gui;
 
-import db.DBHelper;
+import db.DBRequest;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -128,7 +128,7 @@ public class MealManagerGUI extends JFrame {
         new SwingWorker<JSONArray, Void>() {
             @Override
             protected JSONArray doInBackground() throws Exception {
-                return DBHelper.queryMeals();
+                return DBRequest.queryMeals();
             }
             
             @Override
@@ -143,8 +143,8 @@ public class MealManagerGUI extends JFrame {
                             meal.getInt("meal_id"),
                             meal.getString("meal_name"),
                             meal.getInt("prep_time"),
-                            meal.getString("created_at"),
-                            meal.getString("updated_at")
+                            meal.optString("created_at", "-"),
+                            meal.optString("updated_at", "-")
                         });
                     }
                     
@@ -180,7 +180,7 @@ public class MealManagerGUI extends JFrame {
                     "&meal_name=" + java.net.URLEncoder.encode(name, "UTF-8") +
                     "&prep_time=" + prepTime;
                 
-                JSONObject response = DBHelper.httpGet(url);
+                JSONObject response = DBRequest.httpGet(url);
                 
                 if (!"success".equals(response.getString("status"))) {
                     throw new Exception(response.getString("message"));
@@ -238,7 +238,7 @@ public class MealManagerGUI extends JFrame {
                     "&meal_name=" + java.net.URLEncoder.encode(name, "UTF-8") +
                     "&prep_time=" + prepTime;
                 
-                JSONObject response = DBHelper.httpGet(url);
+                JSONObject response = DBRequest.httpGet(url);
                 
                 if (!"success".equals(response.getString("status"))) {
                     throw new Exception(response.getString("message"));
@@ -296,7 +296,7 @@ public class MealManagerGUI extends JFrame {
                 String url = "http://120.107.152.110/~a0303/DB/crud.php" +
                     "?action=delete&table=McOS_meal&id=" + mealId;
                 
-                JSONObject response = DBHelper.httpGet(url);
+                JSONObject response = DBRequest.httpGet(url);
                 
                 if (!"success".equals(response.getString("status"))) {
                     throw new Exception(response.getString("message"));
@@ -394,7 +394,7 @@ public class MealManagerGUI extends JFrame {
             @Override
             protected JSONObject doInBackground() throws Exception {
                 String url = "http://120.107.152.110/~a0303/DB/crud.php?action=status&table=McOS_meal";
-                return DBHelper.httpGet(url);
+                return DBRequest.httpGet(url);
             }
             
             @Override
@@ -443,7 +443,7 @@ public class MealManagerGUI extends JFrame {
             @Override
             protected JSONObject doInBackground() throws Exception {
                 String url = "http://120.107.152.110/~a0303/DB/crud.php?action=reset&table=McOS_meal";
-                return DBHelper.httpGet(url);
+                return DBRequest.httpGet(url);
             }
             
             @Override

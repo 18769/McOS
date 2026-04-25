@@ -21,7 +21,7 @@ mkdir "%BIN_DIR%"
 REM 編譯 Java 源文件
 echo [2/3] 編譯 Java 源文件...
 cd "%SRC_DIR%"
-javac -encoding UTF-8 -cp "%CLASSPATH%" -d "%BIN_DIR%" db\DBHelper.java gui\MealManagerGUI.java
+javac -encoding UTF-8 -cp "%CLASSPATH%" -d "%BIN_DIR%" db\DBrequest.java gui\MealManagerGUI.java
 
 if !errorlevel! neq 0 (
     echo ✗ 編譯失敗！

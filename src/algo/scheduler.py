@@ -1,5 +1,6 @@
 import json
 import socket
+from pathlib import Path
 
 class McOSScheduler:
     def __init__(self):
@@ -10,6 +11,22 @@ class McOSScheduler:
         # 格式: { order_id: { "name": "套餐名", "items": [...], "remaining_tasks": int, 
         #                      "is_takeout": bool, "total_prep_time": int } }
         self.order_tracker = {}
+
+        # 員工池（worker_id -> available_time）
+        self.workers = self._load_workers()
+        self.worker_available = {worker_id: 0 for worker_id in self.workers}
+
+    def _load_workers(self):
+        worker_file = Path(__file__).resolve().parents[2] / "DB" / "worker.json"
+        try:
+            data = json.loads(worker_file.read_text(encoding="utf-8"))
+            worker_ids = [int(w.get("worker_id")) for w in data if "worker_id" in w]
+            worker_ids = [wid for wid in worker_ids if wid > 0]
+            if worker_ids:
+                return sorted(worker_ids)
+        except Exception:
+            pass
+        return [1]
 
     def optimize_schedule(self, new_orders):
         """
@@ -79,6 +96,10 @@ class McOSScheduler:
 
     def _reschedule(self):
         """ 統一處理排序與預計時間計算（整包與包內皆採最短作業優先）"""
+        # 若 worker pool 有變動，確保 available map 有對應 key
+        for worker_id in self.workers:
+            self.worker_available.setdefault(worker_id, 0)
+
         # 1) 先按 order_id 分組，計算整包總時間（Shortest Total Processing Time）
         order_groups = {}
         for task in self.pending_queue:
@@ -103,13 +124,19 @@ class McOSScheduler:
 
         self.pending_queue = new_queue
 
-        # 4) 重新計算每個任務的預計完成時間
-        current_time = 0
+        # 4) 重新計算每個任務的預計完成時間（依員工可用狀態）
         for task in self.pending_queue:
             actual_time = task.get('base_prep_time', task.get('prep_time', 5))
             task['prep_time'] = actual_time
-            current_time += actual_time
-            task['expected_at'] = current_time
+
+            # 挑選最早可用的員工，若同時可用則取 worker_id 最小
+            selected_worker = min(self.worker_available.items(), key=lambda x: (x[1], x[0]))[0]
+            start_time = self.worker_available[selected_worker]
+            finish_time = start_time + actual_time
+
+            task['worker_id'] = selected_worker
+            task['expected_at'] = finish_time
+            self.worker_available[selected_worker] = finish_time
 
         return self.pending_queue
 
