@@ -100,6 +100,67 @@ public class DBRequest {
         }
     }
 
+    /**
+     * 載入廚房設備（本地測試用），由 DB/equipment.json 提供
+     * 回傳 JSONArray of equipment objects
+     */
+    public static JSONArray loadKitchenEquipment() {
+        String path = "DB/equipment.json";
+        try {
+            byte[] raw = Files.readAllBytes(Paths.get(path));
+            String[] tryCharsets = new String[]{"UTF-8", "MS950", "Big5", "UTF-16LE"};
+            for (String csName : tryCharsets) {
+                try {
+                    String content = new String(raw, java.nio.charset.Charset.forName(csName));
+                    // try parse
+                    JSONArray arr = new JSONArray(content);
+                    System.out.println("從 " + path + " 用編碼 " + csName + " 成功解析設備資料 (" + arr.length() + " 條)");
+                    return arr;
+                } catch (Exception ex) {
+                    // ignore and try next charset
+                }
+            }
+            System.err.println("讀取設備資料失敗: 無法以已知編碼解析 " + path);
+            return new JSONArray();
+        } catch (Exception e) {
+            System.err.println("讀取設備資料失敗: " + e.getMessage());
+            return new JSONArray();
+        }
+    }
+
+    /**
+     * 載入食譜（本地測試用），由 DB/recipe.json 提供
+     * 回傳 JSONArray of recipe objects
+     */
+    public static JSONArray loadRecipes() {
+        String path = "DB/recipe.json";
+        try {
+            String content = Files.readString(Paths.get(path), StandardCharsets.UTF_8);
+            return new JSONArray(content);
+        } catch (Exception e) {
+            System.err.println("讀取食譜資料失敗: " + e.getMessage());
+            return new JSONArray();
+        }
+    }
+
+    /**
+     * 根據餐點名稱尋找本地食譜（DB/recipe.json），若找不到回傳 null
+     */
+    public static JSONObject getRecipeByMealName(String mealName) {
+        try {
+            JSONArray recipes = loadRecipes();
+            for (int i = 0; i < recipes.length(); i++) {
+                JSONObject r = recipes.getJSONObject(i);
+                if (r.has("meal_name") && mealName.equals(r.getString("meal_name"))) {
+                    return r;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("getRecipeByMealName error: " + e.getMessage());
+        }
+        return null;
+    }
+
     public static WorkerRoster loadWorkerRoster() {
         JSONArray workersJson = loadWorkers();
         ArrayList<JSONObject> workers = new ArrayList<>();

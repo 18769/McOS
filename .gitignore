@@ -5,3 +5,6 @@ product/
 /DB/
 /bin/
 /docs/
+__pycache__/
+test/
+experiment_results.csv
