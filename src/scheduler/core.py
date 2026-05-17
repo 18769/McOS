@@ -51,6 +51,12 @@ class McOSScheduler:
             if isinstance(data, list):
                 for equip in data:
                     equip.setdefault("status", "")
+                    if equip.get("Etype") is None and equip.get("etype") is not None:
+                        equip["Etype"] = equip.get("etype")
+                    if equip.get("equipmentID") is not None:
+                        equip["equipmentID"] = str(equip.get("equipmentID"))
+                    if equip.get("Etype") is not None:
+                        equip["Etype"] = str(equip.get("Etype", "")).strip().lower()
                 return data
         except Exception:
             pass
@@ -58,8 +64,34 @@ class McOSScheduler:
 
     def _save_equipment(self):
         try:
+            existing_list = []
+            if self.equipment_path.exists():
+                try:
+                    existing_list = json.loads(self.equipment_path.read_text(encoding="utf-8"))
+                    if not isinstance(existing_list, list):
+                        existing_list = []
+                except Exception:
+                    existing_list = []
+
+            index_map = {}
+            for idx, equip in enumerate(existing_list):
+                eid = equip.get("equipmentID")
+                if eid is not None:
+                    index_map[str(eid)] = idx
+
+            for equip in self.equipments:
+                eid = equip.get("equipmentID")
+                if eid is None:
+                    continue
+                eid = str(eid)
+                if eid in index_map:
+                    existing_list[index_map[eid]].update(equip)
+                else:
+                    existing_list.append(equip)
+                    index_map[eid] = len(existing_list) - 1
+
             self.equipment_path.write_text(
-                json.dumps(self.equipments, ensure_ascii=False, indent=2),
+                json.dumps(existing_list, ensure_ascii=False, indent=2),
                 encoding="utf-8"
             )
         except Exception:
@@ -77,10 +109,28 @@ class McOSScheduler:
         if not equipment_type:
             return None
 
-        matching = [
-            equip for equip in self.equipments
-            if str(equip.get("Etype", "")).strip().lower() == equipment_type
-        ]
+        equipment_type_alias = equipment_type
+        if "煎" in equipment_type or "烤" in equipment_type or "grill" in equipment_type:
+            equipment_type_alias = "grill"
+        elif "炸" in equipment_type or "fry" in equipment_type:
+            equipment_type_alias = "fryer"
+        elif "擺盤" in equipment_type or "plating" in equipment_type:
+            equipment_type_alias = "plating_station"
+        elif "備料" in equipment_type or "prep" in equipment_type:
+            equipment_type_alias = "prep_station"
+        elif "蒸" in equipment_type or "steam" in equipment_type:
+            equipment_type_alias = "grill"
+
+        matching = []
+        for equip in self.equipments:
+            etype = str(equip.get("Etype", "")).strip().lower()
+            name = str(equip.get("name", "")).strip().lower()
+            if etype == equipment_type_alias or etype == equipment_type:
+                matching.append(equip)
+                continue
+            if equipment_type in name or name in equipment_type:
+                matching.append(equip)
+                continue
         if not matching:
             return None
 
@@ -121,14 +171,34 @@ class McOSScheduler:
                 # --- 防呆機制 2：兼容新版 Recipe (有 steps) 與舊版格式 (無 steps) ---
                 steps = item.get("steps", [])
                 if steps:
-                    for step in steps:
+                    def step_order_value(s, index):
+                        if isinstance(s, dict):
+                            if "step_order" in s:
+                                try:
+                                    return int(s.get("step_order"))
+                                except Exception:
+                                    return s.get("step_order")
+                            if "stepOrder" in s:
+                                try:
+                                    return int(s.get("stepOrder"))
+                                except Exception:
+                                    return s.get("stepOrder")
+                        return index + 1
+
+                    indexed_steps = list(enumerate(list(steps)))
+                    steps_sorted = sorted(
+                        indexed_steps,
+                        key=lambda pair: step_order_value(pair[1], pair[0])
+                    )
+                    for index, (_, step) in enumerate(steps_sorted):
+                        step_order = step_order_value(step, index)
                         task_list.append({
                             "item": step.get("step_name"),  
                             "meal_name": base_meal_name,    
                             "prep_time": step.get("duration_sec", 5), 
                             "description": step.get("step_name"),
                             "equipment_type": step.get("equipment_type", ""),
-                            "task_index": step.get("step_order", 0) 
+                            "task_index": step_order if step_order is not None else index
                         })
                 else:
                     task_list.append({
@@ -188,6 +258,7 @@ class McOSScheduler:
             
             eid = task.get("equipment_id")
             if eid:
+                eid = str(eid)
                 self.equipment_available[eid] = max(self.equipment_available.get(eid, 0), expected_at)
 
         tasks_to_schedule = new_tasks
@@ -203,6 +274,7 @@ class McOSScheduler:
             meal_groups[key].append(task)
 
         for (order_id, meal_name), tasks in meal_groups.items():
+            tasks = sorted(tasks, key=lambda t: int(t.get("task_index", 0)))
             group_id = f"{order_id}:{meal_name}"
             
             if group_id in self.group_worker_mapping:
@@ -235,6 +307,7 @@ class McOSScheduler:
                 task["group_id"] = group_id  
 
                 if selected_equipment_id:
+                    selected_equipment_id = str(selected_equipment_id)
                     task["equipment_id"] = selected_equipment_id
                     task["equipment_name"] = selected_equipment.get("name", selected_equipment_id)
                     status_text = f"{self._worker_label(selected_worker)}:{task.get('item', 'unknown_item')}|{task.get('id')}"
@@ -263,6 +336,7 @@ class McOSScheduler:
         for worker_id, task in worker_current_tasks.items():
             equipment_id = task.get("equipment_id")
             if equipment_id:
+                equipment_id = str(equipment_id)
                 expected_at = task.get("expected_at", float('inf'))
                 if equipment_id not in equipment_display_map or expected_at < equipment_display_map[equipment_id]["expected_at"]:
                     equipment_display_map[equipment_id] = {
@@ -276,7 +350,7 @@ class McOSScheduler:
             task = display_info["task"]
             status_text = f"{self._worker_label(worker_id)}:{task.get('item', 'unknown_item')}|{task.get('id')}"
             for equip in self.equipments:
-                if equip.get("equipmentID") == equipment_id:
+                if str(equip.get("equipmentID")) == str(equipment_id):
                     equip["status"] = status_text
                     break
 
@@ -304,8 +378,9 @@ class McOSScheduler:
             # Clear equipment status
             equipment_id = removed_task.get("equipment_id")
             if equipment_id:
+                equipment_id = str(equipment_id)
                 for equip in self.equipments:
-                    if equip.get("equipmentID") == equipment_id:
+                    if str(equip.get("equipmentID")) == equipment_id:
                         equip["status"] = ""
                         break
                 # 更新設備可用時間為該任務的完成時間（使用相對時間）

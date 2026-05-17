@@ -1,6 +1,5 @@
 package gui;
 
-import db.DBRequest;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -9,6 +8,9 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 public class EquipmentDialog extends JDialog {
     private JTable table;
@@ -67,7 +69,7 @@ public class EquipmentDialog extends JDialog {
         SwingUtilities.invokeLater(() -> {
             model.setRowCount(0);
             try {
-                JSONArray arr = DBRequest.loadKitchenEquipment();
+                JSONArray arr = loadEquipmentLocal();
                 for (int i = 0; i < arr.length(); i++) {
                     JSONObject o = arr.getJSONObject(i);
                     String id = o.optString("equipmentID", o.optString("equipmentId", ""));
@@ -84,6 +86,15 @@ public class EquipmentDialog extends JDialog {
                         "載入設備失敗: " + ex.getMessage(), "錯誤", JOptionPane.ERROR_MESSAGE));
             }
         });
+    }
+
+    private JSONArray loadEquipmentLocal() throws Exception {
+        java.nio.file.Path path = Paths.get("DB", "equipment.json");
+        if (!Files.exists(path)) {
+            return new JSONArray();
+        }
+        String content = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        return new JSONArray(content);
     }
 
     private void startAutoRefresh() {

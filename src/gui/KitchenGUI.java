@@ -1,15 +1,14 @@
 package gui;
 
 import javax.swing.*;
-import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.LinkedHashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.io.*;
 import java.net.Socket;
@@ -65,7 +64,8 @@ public class KitchenGUI {
     public KitchenGUI() {
     mealPrepTimes = DBRequest.loadMeals(); // 載入餐點資料庫
     combos = DBRequest.loadCombos(); // 載入套餐資料庫
-    recipes = loadRecipesLocal(); // 載入食譜
+    recipes = loadRecipesFromApi(); // 載入食譜
+    syncEquipmentSnapshot(); // 同步設備快照
     applyWorkerRoster(DBRequest.loadWorkerRoster()); // 載入員工資料
 
         // --- 1. 全域外觀設定 ---
@@ -414,7 +414,57 @@ public class KitchenGUI {
         return mealPrepTimes.getOrDefault(item, 5);
     }
 
-    private LinkedHashMap<String, JSONObject> loadRecipesLocal() {
+    private LinkedHashMap<String, JSONObject> loadRecipesFromApi() {
+        LinkedHashMap<String, JSONObject> recipeMap = new LinkedHashMap<>();
+        try {
+            JSONArray recipes = DBRequest.loadRecipes();
+            persistJsonSnapshot("DB/recipe.json", recipes);
+            for (int i = 0; i < recipes.length(); i++) {
+                JSONObject recipe = recipes.getJSONObject(i);
+                String mealName = recipe.optString("meal_name", "");
+                if (mealName.isEmpty()) {
+                    mealName = recipe.optString("recipe_name", "");
+                }
+                if (!mealName.isEmpty()) {
+                    if (recipeMap.containsKey(mealName)) {
+                        JSONObject existing = recipeMap.get(mealName);
+                        JSONArray existingSteps = existing.optJSONArray("steps");
+                        JSONArray newSteps = recipe.optJSONArray("steps");
+                        if (existingSteps != null && newSteps != null) {
+                            for (int s = 0; s < newSteps.length(); s++) {
+                                existingSteps.put(newSteps.getJSONObject(s));
+                            }
+                        }
+                    } else {
+                        recipeMap.put(mealName, recipe);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to load recipes from API: " + e.getMessage());
+            recipeMap.putAll(loadRecipesLocalFallback());
+        }
+        return recipeMap;
+    }
+
+    private void syncEquipmentSnapshot() {
+        try {
+            JSONArray equipment = DBRequest.loadKitchenEquipment();
+            persistJsonSnapshot("DB/equipment.json", equipment);
+        } catch (Exception e) {
+            System.err.println("Failed to sync equipment snapshot: " + e.getMessage());
+        }
+    }
+
+    private void persistJsonSnapshot(String path, JSONArray data) throws Exception {
+        java.nio.file.Path p = java.nio.file.Paths.get(path);
+        if (p.getParent() != null && !java.nio.file.Files.exists(p.getParent())) {
+            java.nio.file.Files.createDirectories(p.getParent());
+        }
+        java.nio.file.Files.write(p, data.toString(2).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private LinkedHashMap<String, JSONObject> loadRecipesLocalFallback() {
         LinkedHashMap<String, JSONObject> recipeMap = new LinkedHashMap<>();
         try {
             String recipePath = "DB/recipe.json";
@@ -426,11 +476,16 @@ public class KitchenGUI {
             JSONArray recipes = new JSONArray(content);
             for (int i = 0; i < recipes.length(); i++) {
                 JSONObject recipe = recipes.getJSONObject(i);
-                String mealName = recipe.getString("meal_name");
-                recipeMap.put(mealName, recipe);
+                String mealName = recipe.optString("meal_name", "");
+                if (mealName.isEmpty()) {
+                    mealName = recipe.optString("recipe_name", "");
+                }
+                if (!mealName.isEmpty()) {
+                    recipeMap.put(mealName, recipe);
+                }
             }
         } catch (Exception e) {
-            System.err.println("Failed to load recipes: " + e.getMessage());
+            System.err.println("Failed to load recipes from local file: " + e.getMessage());
         }
         return recipeMap;
     }
@@ -449,6 +504,32 @@ public class KitchenGUI {
             }
         }
         return getDefaultPrepTime(mealName);
+    }
+
+    private JSONArray getSortedSteps(JSONArray steps) {
+        ArrayList<JSONObject> list = new ArrayList<>();
+        for (int i = 0; i < steps.length(); i++) {
+            JSONObject step = steps.getJSONObject(i);
+            if (!step.has("step_order") && step.has("stepOrder")) {
+                step.put("step_order", step.optInt("stepOrder", i + 1));
+            }
+            if (!step.has("step_order")) {
+                step.put("step_order", i + 1);
+            }
+            // normalize equipment_type to match scheduler matching
+            if (step.has("equipment_type")) {
+                String etype = step.optString("equipment_type", "").trim().toLowerCase();
+                step.put("equipment_type", etype);
+            }
+            list.add(step);
+        }
+        list.sort(Comparator.comparingInt(s -> s.optInt("step_order", Integer.MAX_VALUE)));
+
+        JSONArray sorted = new JSONArray();
+        for (JSONObject step : list) {
+            sorted.put(step);
+        }
+        return sorted;
     }
 
 
@@ -519,7 +600,10 @@ public class KitchenGUI {
                         
                         // 【關鍵修復】: 把載入的食譜步驟包裝進去
                         if (recipes.containsKey(subName)) {
-                            itemObj.put("steps", recipes.get(subName).getJSONArray("steps"));
+                            JSONArray steps = recipes.get(subName).optJSONArray("steps");
+                            if (steps != null) {
+                                itemObj.put("steps", getSortedSteps(steps));
+                            }
                         } else {
                             itemObj.put("prep_time", subItem.optInt("prep_time", 5));
                         }
@@ -542,7 +626,10 @@ public class KitchenGUI {
                     
                     // 【關鍵修復】: 單項也要把食譜步驟包裝進去！
                     if (recipes.containsKey(itemName)) {
-                        itemObj.put("steps", recipes.get(itemName).getJSONArray("steps"));
+                        JSONArray steps = recipes.get(itemName).optJSONArray("steps");
+                        if (steps != null) {
+                            itemObj.put("steps", getSortedSteps(steps));
+                        }
                     } else {
                         itemObj.put("prep_time", prepTime);
                     }
@@ -792,6 +879,7 @@ public class KitchenGUI {
      * 檢查並標記任務完成。
      * 當訂單的所有任務都完成時，返回 true
      */
+    @SuppressWarnings("unused")
     private boolean checkAndMarkTaskComplete(int orderId, String taskName) {
         if (!orderRegistry.containsKey(orderId)) {
             return false;

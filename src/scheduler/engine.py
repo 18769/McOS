@@ -86,6 +86,28 @@ def start_engine():
                     prep_time = order.get('prep_time', 0)
                     is_takeout = order.get('is_takeout', False)
 
+                    steps = order.get('steps')
+                    if isinstance(steps, list) and len(steps) > 0:
+                        items = []
+                        for idx, step in enumerate(steps):
+                            step_name = step.get('step_name') or step.get('description') or f"{meal_name} step"
+                            duration = step.get('duration_sec', step.get('prep_time', 1))
+                            items.append({
+                                'item': step_name,
+                                'prep_time': int(duration),
+                                'equipment_type': step.get('equipment_type', ''),
+                                'task_index': step.get('step_order', idx),
+                                'description': step_name
+                            })
+                        expanded.append({
+                            'id': order.get('id'),
+                            'item': meal_name,
+                            'is_takeout': is_takeout,
+                            'items': items,
+                            'total_prep_time': sum(i['prep_time'] for i in items)
+                        })
+                        continue
+
                     recipe = recipes.get_recipe_by_meal_name(meal_name)
                     if recipe and isinstance(recipe.get('steps'), list) and len(recipe.get('steps')) > 0:
                         items = []

@@ -1,5 +1,4 @@
 package db;
-
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -10,9 +9,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.ArrayList;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -38,6 +34,8 @@ public class DBRequest {
     private static final String COMBOS_URL = API_BASE + "/get_combos.php";
     private static final String COMBO_CRUD_URL = API_BASE + "/combo_crud.php";
     private static final String WORKERS_URL = API_BASE + "/get_workers.php";
+    private static final String EQUIPMENT_URL = API_BASE + "/get_equipment.php";
+    private static final String RECIPE_URL = API_BASE + "/get_recipes.php";
 
     public static LinkedHashMap<String, Integer> loadMeals() {
         LinkedHashMap<String, Integer> mealPrepTimes = new LinkedHashMap<>();
@@ -103,50 +101,158 @@ public class DBRequest {
     }
 
     /**
-     * 載入廚房設備（本地測試用），由 DB/equipment.json 提供
+     * 載入廚房設備，完全比照 loadWorkers 模式，直接走線上 API 讀取
      * 回傳 JSONArray of equipment objects
      */
     public static JSONArray loadKitchenEquipment() {
-        String path = "DB/equipment.json";
         try {
-            byte[] raw = Files.readAllBytes(Paths.get(path));
-            String[] tryCharsets = new String[]{"UTF-8", "MS950", "Big5", "UTF-16LE"};
-            for (String csName : tryCharsets) {
-                try {
-                    String content = new String(raw, java.nio.charset.Charset.forName(csName));
-                    // try parse
-                    JSONArray arr = new JSONArray(content);
-                    System.out.println("從 " + path + " 用編碼 " + csName + " 成功解析設備資料 (" + arr.length() + " 條)");
-                    return arr;
-                } catch (Exception ex) {
-                    // ignore and try next charset
+            JSONObject response = httpGet(EQUIPMENT_URL);
+            JSONArray data = response.getJSONArray("data");
+
+            // local equipment.json is used as time-slice status overlay only
+            java.nio.file.Path localPath = java.nio.file.Paths.get("DB", "equipment.json");
+            if (java.nio.file.Files.exists(localPath)) {
+                String content = new String(java.nio.file.Files.readAllBytes(localPath), StandardCharsets.UTF_8);
+                JSONArray localData = new JSONArray(content);
+
+                java.util.HashMap<String, String> statusMap = new java.util.HashMap<>();
+                for (int i = 0; i < localData.length(); i++) {
+                    JSONObject o = localData.getJSONObject(i);
+                    String id = o.optString("equipmentID", o.optString("equipmentId", ""));
+                    if (!id.isEmpty()) {
+                        statusMap.put(id, o.optString("status", ""));
+                    }
+                }
+
+                for (int i = 0; i < data.length(); i++) {
+                    JSONObject o = data.getJSONObject(i);
+                    String id = o.optString("equipmentID", o.optString("equipmentId", ""));
+                    if (statusMap.containsKey(id)) {
+                        o.put("status", statusMap.get(id));
+                    }
                 }
             }
-            System.err.println("讀取設備資料失敗: 無法以已知編碼解析 " + path);
-            return new JSONArray();
+
+            System.out.println("成功從資料庫載入 " + data.length() + " 條設備資料");
+            return data;
         } catch (Exception e) {
-            System.err.println("讀取設備資料失敗: " + e.getMessage());
+            System.err.println("讀取資料庫設備失敗: " + e.getMessage());
             return new JSONArray();
         }
     }
 
     /**
-     * 載入食譜（本地測試用），由 DB/recipe.json 提供
+     * 載入食譜，完全比照 loadWorkers 模式，直接走線上 API 讀取
      * 回傳 JSONArray of recipe objects
      */
     public static JSONArray loadRecipes() {
-        String path = "DB/recipe.json";
         try {
-            String content = Files.readString(Paths.get(path), StandardCharsets.UTF_8);
-            return new JSONArray(content);
+            // 取得原始 recipes 與 meals，將 recipes 正規化成系統期待的欄位
+            JSONObject response = httpGet(RECIPE_URL);
+            JSONArray data = response.getJSONArray("data");
+
+            // build mealId -> mealName map to allow lookup by meal name
+            Map<Integer, String> mealMap = new HashMap<>();
+            try {
+                JSONArray meals = queryMeals();
+                for (int i = 0; i < meals.length(); i++) {
+                    JSONObject m = meals.getJSONObject(i);
+                    if (m.has("meal_id") && m.has("meal_name")) {
+                        mealMap.put(m.getInt("meal_id"), m.getString("meal_name"));
+                    }
+                }
+            } catch (Exception ignore) {
+                // if meals cannot be loaded, proceed without mapping
+            }
+
+            // Group steps into recipes: { recipe_name, meal_id, version, steps: [ ... ] }
+            java.util.LinkedHashMap<String, JSONObject> recipeMap = new java.util.LinkedHashMap<>();
+            for (int i = 0; i < data.length(); i++) {
+                JSONObject r = data.getJSONObject(i);
+
+                int mealId = -1;
+                String mealIdStr = null;
+                if (r.has("mealID")) mealIdStr = r.optString("mealID", null);
+                if (mealIdStr == null && r.has("meal_id")) mealIdStr = r.optString("meal_id", null);
+                if (mealIdStr != null && !mealIdStr.isEmpty()) {
+                    try { mealId = Integer.parseInt(mealIdStr); } catch (NumberFormatException ex) { }
+                }
+                if (mealId == -1) mealId = r.optInt("mealID", r.optInt("meal_id", -1));
+
+                // build step object
+                JSONObject step = new JSONObject();
+                int stepOrder = r.optInt("stepOrder", r.optInt("step_order", -1));
+                if (stepOrder != -1) step.put("step_order", stepOrder);
+
+                // step name candidates
+                String stepName = null;
+                if (r.has("stepDescription")) stepName = r.optString("stepDescription", null);
+                if ((stepName == null || stepName.isEmpty()) && r.has("step_description")) stepName = r.optString("step_description", null);
+                if ((stepName == null || stepName.isEmpty()) && r.has("step_name")) stepName = r.optString("step_name", null);
+                if ((stepName == null || stepName.isEmpty()) && r.has("description")) stepName = r.optString("description", null);
+                if ((stepName == null || stepName.isEmpty()) && r.has("stepName")) stepName = r.optString("stepName", null);
+                if (stepName != null && !stepName.isEmpty()) step.put("step_name", stepName);
+
+                // duration
+                if (r.has("timeMinutes")) {
+                    try { int minutes = Integer.parseInt(r.optString("timeMinutes", "0")); step.put("duration_sec", minutes * 60); }
+                    catch (NumberFormatException ex) { step.put("duration_sec", r.optInt("timeMinutes", 0)); }
+                } else if (r.has("duration_sec")) {
+                    step.put("duration_sec", r.optInt("duration_sec", 0));
+                }
+
+                // equipment type
+                if (r.has("etype")) step.put("equipment_type", r.optString("etype").trim().toLowerCase());
+                else if (r.has("equipment_type")) step.put("equipment_type", r.optString("equipment_type"));
+
+                // now determine which recipe object to append to (prefer meal_id to avoid step splitting)
+                String mapKey = null;
+                if (mealId != -1) {
+                    mapKey = String.valueOf(mealId);
+                } else if (r.has("recipeID")) {
+                    mapKey = r.optString("recipeID", null);
+                } else if (r.has("id")) {
+                    mapKey = r.optString("id", null);
+                }
+                if (mapKey == null || mapKey.isEmpty()) {
+                    // fallback to meal name or index
+                    String nameFallback = r.optString("meal_name", r.optString("mealName", "recipe_" + i));
+                    mapKey = nameFallback + "_" + i;
+                }
+
+                if (!recipeMap.containsKey(mapKey)) {
+                    JSONObject recipeObj = new JSONObject();
+                    // recipe-level name
+                    String recipeName = r.optString("recipe_name", null);
+                    if (recipeName == null || recipeName.isEmpty()) {
+                        if (mealId != -1 && mealMap.containsKey(mealId)) recipeName = mealMap.get(mealId);
+                        else recipeName = r.optString("meal_name", r.optString("mealName", "Recipe " + mapKey));
+                    }
+                    recipeObj.put("recipe_name", recipeName);
+                    if (mealId != -1) recipeObj.put("meal_id", mealId);
+                    recipeObj.put("version", r.optInt("version", 1));
+                    recipeObj.put("steps", new JSONArray());
+                    recipeMap.put(mapKey, recipeObj);
+                }
+
+                // append step
+                recipeMap.get(mapKey).getJSONArray("steps").put(step);
+            }
+
+            // build output array
+            JSONArray recipesOut = new JSONArray();
+            for (Map.Entry<String, JSONObject> e : recipeMap.entrySet()) recipesOut.put(e.getValue());
+
+            System.out.println("成功從資料庫載入 " + data.length() + " 條食譜步驟（分組為 " + recipesOut.length() + " 個 recipe）");
+            return recipesOut;
         } catch (Exception e) {
-            System.err.println("讀取食譜資料失敗: " + e.getMessage());
+            System.err.println("讀取資料庫食譜失敗: " + e.getMessage());
             return new JSONArray();
         }
     }
 
     /**
-     * 根據餐點名稱尋找本地食譜（DB/recipe.json），若找不到回傳 null
+     * 根據餐點名稱尋找食譜，若找不到回傳 null
      */
     public static JSONObject getRecipeByMealName(String mealName) {
         try {
