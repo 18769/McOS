@@ -488,12 +488,6 @@ public class KitchenGUI {
             return;
         
         JSONArray ordersToSend = new JSONArray();
-        
-        // 累計所有餐點名稱和任務數
-        JSONArray allItems = new JSONArray();
-        int totalTasks = 0;
-        StringBuilder orderDisplayName = new StringBuilder();
-        
         System.out.println("📋 提交訂單組合：");
         
         for (Object item : orderBuffer) {
@@ -502,21 +496,12 @@ public class KitchenGUI {
             boolean isTakeout = order.optBoolean("is_takeout", false);
             int prepTime = order.optInt("prep_time", 0);
             
-            // 每份餐點分配獨立 ID（即使在同一個提交中也不同）
             int itemOrderId = orderIdCounter++;
             
-            // 累計名稱
-            if (orderDisplayName.length() > 0) {
-                orderDisplayName.append("、");
-            }
-            orderDisplayName.append(itemName);
-            
             try {
-                // 嘗試查詢是否為套餐
                 JSONArray comboItems = DBRequest.getComboItems(itemName);
                 
                 if (comboItems.length() > 0) {
-                    // 是套餐
                     System.out.println("  📦 套餐: " + itemName + " (" + comboItems.length() + " 項) - 訂單 #" + itemOrderId);
                     JSONObject orderObj = new JSONObject();
                     orderObj.put("id", itemOrderId);
@@ -524,52 +509,59 @@ public class KitchenGUI {
                     orderObj.put("is_takeout", isTakeout);
                     
                     JSONArray items = new JSONArray();
-                    int totalTime = 0;
                     for (int j = 0; j < comboItems.length(); j++) {
                         JSONObject subItem = comboItems.getJSONObject(j);
-                        items.put(subItem);
-                        totalTime += subItem.getInt("prep_time");
+                        String subName = subItem.getString("item");
+                        
+                        JSONObject itemObj = new JSONObject();
+                        itemObj.put("item", subName);
+                        itemObj.put("meal_name", subName); // 讓每個餐點獨立被同一個人做完
+                        
+                        // 【關鍵修復】: 把載入的食譜步驟包裝進去
+                        if (recipes.containsKey(subName)) {
+                            itemObj.put("steps", recipes.get(subName).getJSONArray("steps"));
+                        } else {
+                            itemObj.put("prep_time", subItem.optInt("prep_time", 5));
+                        }
+                        items.put(itemObj);
                     }
                     orderObj.put("items", items);
-                    orderObj.put("total_prep_time", totalTime);
                     ordersToSend.put(orderObj);
                     
-                    totalTasks += comboItems.length();
                 } else {
-                    // 不是套餐：直接送出單項，recipe expand 交給 Python engine 處理
                     System.out.println("  🍔 單項: " + itemName + " - 訂單 #" + itemOrderId);
                     JSONObject orderObj = new JSONObject();
                     orderObj.put("id", itemOrderId);
                     orderObj.put("item", itemName);
                     orderObj.put("is_takeout", isTakeout);
-                    orderObj.put("prep_time", prepTime);
-                    ordersToSend.put(orderObj);
 
-                    totalTasks += 1;
+                    JSONArray items = new JSONArray();
+                    JSONObject itemObj = new JSONObject();
+                    itemObj.put("item", itemName);
+                    itemObj.put("meal_name", itemName);
+                    
+                    // 【關鍵修復】: 單項也要把食譜步驟包裝進去！
+                    if (recipes.containsKey(itemName)) {
+                        itemObj.put("steps", recipes.get(itemName).getJSONArray("steps"));
+                    } else {
+                        itemObj.put("prep_time", prepTime);
+                    }
+                    items.put(itemObj);
+
+                    orderObj.put("items", items);
+                    ordersToSend.put(orderObj);
                 }
             } catch (Exception e) {
-                System.out.println("查詢套餐失敗，當作單項: " + itemName);
-                JSONObject orderObj = new JSONObject();
-                orderObj.put("id", itemOrderId);
-                orderObj.put("item", itemName);
-                orderObj.put("is_takeout", order.optBoolean("is_takeout", false));
-                orderObj.put("prep_time", prepTime);
-                ordersToSend.put(orderObj);
-                
-                totalTasks += 1;
+                System.out.println("封裝訂單失敗: " + itemName);
             }
             
-            // 為每份菜分別登記到 orderRegistry
             JSONObject itemInfo = new JSONObject();
             itemInfo.put("name", itemName);
-            itemInfo.put("total_tasks", 1); // 初始值，會在 Python expand recipe 後更新
+            itemInfo.put("total_tasks", 1); 
             itemInfo.put("remaining_tasks", 1);
             itemInfo.put("is_takeout", isTakeout);
             orderRegistry.put(itemOrderId, itemInfo);
         }
-        
-        System.out.println("  → 包含項目數: " + orderBuffer.size());
-        System.out.println("  → 總任務數 (初始): " + totalTasks);
         
         JSONObject payload = new JSONObject();
         payload.put("type", "ADD_ORDER");
@@ -687,9 +679,13 @@ public class KitchenGUI {
     }
 
     private WorkerTaskState startWorkerTask(int workerId, JSONObject task) {
-        String name = task.optString("meal_name", task.getString("item"));
+        // 去除後面的 _0 或 _1，確保介面只會顯示漂亮乾淨的 "大麥克"
+        String rawMealName = task.optString("meal_name", task.getString("item"));
+        String name = rawMealName.replaceAll("_\\d+$", ""); 
+        
         int seconds = task.getInt("prep_time");
         int id = task.getInt("id");
+        
         boolean isTakeout = task.optBoolean("is_takeout", false);
         String description = task.optString("description", "");
 
@@ -828,38 +824,42 @@ public class KitchenGUI {
             sb.append(String.format("%-4s | %-12s | %-5s | %-4s | %-6s\n", "ID", "項目", "預計", "類型", "員工"));
             sb.append("------------------------------------------------\n");
             
-            // Group by group_id if available, otherwise by (id, meal_name)
             java.util.LinkedHashMap<String, JSONObject> seen = new java.util.LinkedHashMap<>();
+            java.util.LinkedHashMap<String, Integer> groupTotalPrepTime = new java.util.LinkedHashMap<>();
             
             for (int i = 0; i < schedule.length(); i++) {
                 JSONObject o = schedule.getJSONObject(i);
                 int orderId = o.getInt("id");
                 String mealName = o.optString("meal_name", o.getString("item"));
                 
-                // 優先使用 group_id，如果沒有則用 (id, meal_name)
                 String groupId = o.optString("group_id", null);
-                String key;
-                if (groupId != null && !groupId.isEmpty()) {
-                    key = groupId;
-                } else {
-                    key = orderId + "::" + mealName;
-                }
+                String key = (groupId != null && !groupId.isEmpty()) ? groupId : (orderId + "::" + mealName);
                 
-                // Only add if we haven't seen this group yet
+                // 【關鍵修復】: 把這個群組 (餐點) 所有步驟的時間加總起來
+                int time = o.optInt("prep_time", 0);
+                groupTotalPrepTime.put(key, groupTotalPrepTime.getOrDefault(key, 0) + time);
+                
+                // 只保留第一筆來當作顯示代表
                 if (!seen.containsKey(key)) {
                     seen.put(key, o);
                 }
             }
             
-            // Now display the unique combinations
-            for (JSONObject o : seen.values()) {
+            // 輸出摺疊過後的排程結果
+            for (String key : seen.keySet()) {
+                JSONObject o = seen.get(key);
                 String type = o.optBoolean("is_takeout") ? "[外帶]" : "[內用]";
                 int workerId = o.optInt("worker_id", 0);
                 String workerLabel = workerId > 0 ? workerNames.getOrDefault(workerId, "W" + workerId) : "-";
-                String displayName = o.optString("meal_name", o.getString("item"));
-                int prepTime = o.optInt("prep_time", 0);
+                
+                // 去除 Python 防打架時附加的 "_0", "_1" 等序號，讓名字保持乾淨 ("大麥克_0" -> "大麥克")
+                String rawMealName = o.optString("meal_name", o.getString("item"));
+                String displayName = rawMealName.replaceAll("_\\d+$", "");
+                
+                int totalPrepTime = groupTotalPrepTime.getOrDefault(key, 0);
+                
                 sb.append(String.format("[#%02d] %-12s | %3ds | %s | %-6s\n",
-                        o.getInt("id"), displayName, prepTime, type, workerLabel));
+                        o.getInt("id"), displayName, totalPrepTime, type, workerLabel));
             }
             scheduleArea.setText(sb.toString());
         });

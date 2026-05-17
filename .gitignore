@@ -7,4 +7,5 @@ product/
 /docs/
 __pycache__/
 test/
+/.venv/
 experiment_results.csv

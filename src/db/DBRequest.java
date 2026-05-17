@@ -37,6 +37,7 @@ public class DBRequest {
     private static final String CRUD_URL = API_BASE + "/crud.php";
     private static final String COMBOS_URL = API_BASE + "/get_combos.php";
     private static final String COMBO_CRUD_URL = API_BASE + "/combo_crud.php";
+    private static final String WORKERS_URL = API_BASE + "/get_workers.php";
 
     public static LinkedHashMap<String, Integer> loadMeals() {
         LinkedHashMap<String, Integer> mealPrepTimes = new LinkedHashMap<>();
@@ -90,12 +91,13 @@ public class DBRequest {
     }
 
     public static JSONArray loadWorkers() {
-        String path = "DB/worker.json";
         try {
-            String content = Files.readString(Paths.get(path), StandardCharsets.UTF_8);
-            return new JSONArray(content);
+            JSONObject response = httpGet(WORKERS_URL);
+            JSONArray data = response.getJSONArray("data");
+            System.out.println("成功從資料庫載入 " + data.length() + " 位員工");
+            return data;
         } catch (Exception e) {
-            System.err.println("讀取員工資料失敗: " + e.getMessage());
+            System.err.println("讀取資料庫員工失敗: " + e.getMessage());
             return new JSONArray();
         }
     }
@@ -161,7 +163,7 @@ public class DBRequest {
         return null;
     }
 
-    public static WorkerRoster loadWorkerRoster() {
+     public static WorkerRoster loadWorkerRoster() {
         JSONArray workersJson = loadWorkers();
         ArrayList<JSONObject> workers = new ArrayList<>();
         ArrayList<Integer> workerIds = new ArrayList<>();
@@ -171,9 +173,7 @@ public class DBRequest {
             JSONObject worker = workersJson.getJSONObject(i);
             workers.add(worker);
             int workerId = worker.optInt("worker_id", 0);
-            if (workerId <= 0) {
-                continue;
-            }
+            if (workerId <= 0) continue;
             String name = worker.optString("name", "Worker " + workerId);
             workerNames.put(workerId, name);
             workerIds.add(workerId);
@@ -184,7 +184,7 @@ public class DBRequest {
             workerNames.put(1, "Worker 1");
         }
 
-        System.out.println("從 worker.json 載入 " + workerIds.size() + " 位員工");
+        System.out.println("從資料庫 API 載入 " + workerIds.size() + " 位員工");
         return new WorkerRoster(workers, workerIds, workerNames);
     }
 

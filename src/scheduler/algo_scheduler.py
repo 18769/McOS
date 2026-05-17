@@ -4,17 +4,30 @@ from pathlib import Path
 
 class McOSScheduler:
     def __init__(self):
-        # ¼p©Ğ±Æ¶¤¡]¥i©î´²ªº¥ô°È¦Cªí¡^
+        # å»šæˆ¿æ’éšŠï¼ˆå¯æ‹†æ•£çš„ä»»å‹™åˆ—è¡¨ï¼‰
         self.pending_queue = []
         
-        # ­q³æ¼h¯Å°lÂÜ¡]¤£©î´²¡^
+        # è¨‚å–®å±¤ç´šè¿½è¹¤ï¼ˆä¸æ‹†æ•£ï¼‰
         self.order_tracker = {}
 
-        # ­û¤u¦À¡]worker_id -> available_time¡^
+        # å“¡å·¥æ± ï¼ˆworker_id -> available_timeï¼‰
         self.workers = self._load_workers()
         self.worker_available = {worker_id: 0 for worker_id in self.workers}
 
     def _load_workers(self):
+        import urllib.request, urllib.error, json
+        try:
+            req = urllib.request.Request("http://120.107.152.110/~a0303/DB/get_workers.php")
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode('utf-8'))
+                    worker_ids = [int(w.get("worker_id")) for w in data.get("data", []) if "worker_id" in w]
+                    worker_ids = [wid for wid in worker_ids if wid > 0]
+                    if worker_ids:
+                        return sorted(worker_ids)
+        except Exception:
+            pass
+            
         worker_file = Path(__file__).resolve().parents[2] / "DB" / "worker.json"
         try:
             data = json.loads(worker_file.read_text(encoding="utf-8"))
@@ -24,10 +37,10 @@ class McOSScheduler:
                 return sorted(worker_ids)
         except Exception:
             pass
-        return [1]
+        return [1, 2]
 
     def optimize_schedule(self, new_orders):
-        # ¥ı«ö order_id ¤À²Õ
+        # å…ˆæŒ‰ order_id åˆ†çµ„
         orders_by_id = {}
         for order in new_orders:
             order_id = order['id']
@@ -52,7 +65,7 @@ class McOSScheduler:
         for order_id, order_data in orders_by_id.items():
             items = order_data['items']
             is_takeout = order_data['is_takeout']
-            order_name = "¡B".join(order_data['names'])
+            order_name = "ã€".join(order_data['names'])
             total_time = sum(item.get('prep_time', 0) for item in items)
             task_count = len(items)
             self.order_tracker[order_id] = {
@@ -130,7 +143,7 @@ class McOSScheduler:
                     pack_task = {
                         "id": order_id,
                         "order_name": order_info["name"],
-                        "item": "? ¥´¥]¸Ë³U",
+                        "item": "? æ‰“åŒ…è£è¢‹",
                         "prep_time": 4,
                         "is_takeout": True,
                         "is_pack_task": True,
