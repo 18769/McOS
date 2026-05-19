@@ -41,7 +41,7 @@ for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr :9999') do (
 
 echo [4/5] 啟動 Python 核心引擎...
 :: 啟動 engine.py (記得這會處理 Aging 和 SJF 算法)
-start "McOS_Engine" python "%SRC_DIR%\engine.py"
+start python "%SRC_DIR%\engine.py"
 timeout /t 2 /nobreak >nul
 
 echo [5/5] 啟動 McOS 主視窗...

@@ -65,6 +65,7 @@ public class KitchenGUI {
     mealPrepTimes = DBRequest.loadMeals(); // 載入餐點資料庫
     combos = DBRequest.loadCombos(); // 載入套餐資料庫
     recipes = loadRecipesFromApi(); // 載入食譜
+    applyRecipePrepTimes();
     syncEquipmentSnapshot(); // 同步設備快照
     applyWorkerRoster(DBRequest.loadWorkerRoster()); // 載入員工資料
 
@@ -418,7 +419,6 @@ public class KitchenGUI {
         LinkedHashMap<String, JSONObject> recipeMap = new LinkedHashMap<>();
         try {
             JSONArray recipes = DBRequest.loadRecipes();
-            persistJsonSnapshot("DB/recipe.json", recipes);
             for (int i = 0; i < recipes.length(); i++) {
                 JSONObject recipe = recipes.getJSONObject(i);
                 String mealName = recipe.optString("meal_name", "");
@@ -442,7 +442,6 @@ public class KitchenGUI {
             }
         } catch (Exception e) {
             System.err.println("Failed to load recipes from API: " + e.getMessage());
-            recipeMap.putAll(loadRecipesLocalFallback());
         }
         return recipeMap;
     }
@@ -464,32 +463,6 @@ public class KitchenGUI {
         java.nio.file.Files.write(p, data.toString(2).getBytes(StandardCharsets.UTF_8));
     }
 
-    private LinkedHashMap<String, JSONObject> loadRecipesLocalFallback() {
-        LinkedHashMap<String, JSONObject> recipeMap = new LinkedHashMap<>();
-        try {
-            String recipePath = "DB/recipe.json";
-            java.nio.file.Path path = java.nio.file.Paths.get(recipePath);
-            if (!java.nio.file.Files.exists(path)) {
-                return recipeMap;
-            }
-            String content = new String(java.nio.file.Files.readAllBytes(path), "UTF-8");
-            JSONArray recipes = new JSONArray(content);
-            for (int i = 0; i < recipes.length(); i++) {
-                JSONObject recipe = recipes.getJSONObject(i);
-                String mealName = recipe.optString("meal_name", "");
-                if (mealName.isEmpty()) {
-                    mealName = recipe.optString("recipe_name", "");
-                }
-                if (!mealName.isEmpty()) {
-                    recipeMap.put(mealName, recipe);
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("Failed to load recipes from local file: " + e.getMessage());
-        }
-        return recipeMap;
-    }
-
     private int getRecipeOrDefaultPrepTime(String mealName) {
         if (recipes.containsKey(mealName)) {
             JSONObject recipe = recipes.get(mealName);
@@ -504,6 +477,24 @@ public class KitchenGUI {
             }
         }
         return getDefaultPrepTime(mealName);
+    }
+
+    private void applyRecipePrepTimes() {
+        for (Map.Entry<String, JSONObject> entry : recipes.entrySet()) {
+            String mealName = entry.getKey();
+            JSONObject recipe = entry.getValue();
+            JSONArray steps = recipe.optJSONArray("steps");
+            if (steps == null || steps.length() == 0) {
+                continue;
+            }
+            int total = 0;
+            for (int i = 0; i < steps.length(); i++) {
+                total += steps.getJSONObject(i).optInt("duration_sec", 0);
+            }
+            if (total > 0) {
+                mealPrepTimes.put(mealName, total);
+            }
+        }
     }
 
     private JSONArray getSortedSteps(JSONArray steps) {

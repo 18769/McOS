@@ -1,4 +1,3 @@
 OrderID,Item,Algo,WaitTime,TurnaroundTime
-1,玉米湯,fcfs_logic,0,1.02
-1,可樂,fcfs_logic,1.71,2.71
-1,蘋果派,fcfs_logic,0,3.73
+1,智能雙面煎烤台自動下放兩片牛肉排並高溫壓煎,fcfs_logic,0,5.04
+1,旋風蒸氣烤箱同步加熱三層漢堡麵包,fcfs_logic,5.05,8.05

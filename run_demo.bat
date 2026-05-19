@@ -71,7 +71,7 @@ timeout /t 1 /nobreak >nul
 
 :: 啟動 Python 排程引擎
 echo [3/4] 啟動 Python 排程引擎...
-start "" "%PYTHON_PATH%" "%SRC_DIR%\algo\scheduler.py"
+start "McOS_Engine" "%PYTHON_PATH%" "%SRC_DIR%\engine.py"
 timeout /t 2 /nobreak >nul
 
 :: 啟動 Java GUI

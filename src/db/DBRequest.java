@@ -37,6 +37,56 @@ public class DBRequest {
     private static final String EQUIPMENT_URL = API_BASE + "/get_equipment.php";
     private static final String RECIPE_URL = API_BASE + "/get_recipes.php";
 
+    private static int normalizePrepTimeSeconds(int prepTime) {
+        if (prepTime <= 0) {
+            return prepTime;
+        }
+        // API prep_time is typically minutes; treat small values as minutes.
+        if (prepTime <= 30) {
+            return prepTime * 60;
+        }
+        return prepTime;
+    }
+
+    private static LinkedHashMap<String, ArrayList<Integer>> parseComboMeals(JSONArray combosArray) {
+        LinkedHashMap<String, ArrayList<Integer>> comboMeals = new LinkedHashMap<>();
+        for (int i = 0; i < combosArray.length(); i++) {
+            JSONObject combo = combosArray.getJSONObject(i);
+            String comboName = combo.optString("combo_name", combo.optString("comboName", ""));
+            if (comboName.isEmpty()) {
+                comboName = combo.optString("combo_name", "");
+            }
+            if (comboName.isEmpty()) {
+                continue;
+            }
+            ArrayList<Integer> mealIds = comboMeals.getOrDefault(comboName, new ArrayList<>());
+
+            if (combo.has("food_items")) {
+                String foodItemsStr = combo.optString("food_items", "");
+                if (!foodItemsStr.isEmpty()) {
+                    String[] items = foodItemsStr.split(",");
+                    for (String mealIdStr : items) {
+                        try {
+                            int mealId = Integer.parseInt(mealIdStr.trim());
+                            if (mealId > 0 && !mealIds.contains(mealId)) {
+                                mealIds.add(mealId);
+                            }
+                        } catch (NumberFormatException ignore) {
+                        }
+                    }
+                }
+            } else {
+                int mealId = combo.optInt("mealID", combo.optInt("meal_id", -1));
+                if (mealId > 0 && !mealIds.contains(mealId)) {
+                    mealIds.add(mealId);
+                }
+            }
+
+            comboMeals.put(comboName, mealIds);
+        }
+        return comboMeals;
+    }
+
     public static LinkedHashMap<String, Integer> loadMeals() {
         LinkedHashMap<String, Integer> mealPrepTimes = new LinkedHashMap<>();
         try {
@@ -45,24 +95,24 @@ public class DBRequest {
             for (int i = 0; i < meals.length(); i++) {
                 JSONObject m = meals.getJSONObject(i);
                 String mealName = m.getString("meal_name");
-                int prepTime = m.getInt("prep_time");
-                System.out.println("  餐點: " + mealName + " | 準備時間: " + prepTime);
+                int prepTime = normalizePrepTimeSeconds(m.getInt("prep_time"));
+                System.out.println("  餐點: " + mealName + " | 準備時間(秒): " + prepTime);
                 mealPrepTimes.put(mealName, prepTime);
             }
             System.out.println("從資料庫成功載入 " + meals.length() + " 個餐點\n");
         } catch (Exception e) {
             System.err.println("讀取資料庫失敗，改用預設資料: " + e.getMessage());
             e.printStackTrace();
-            mealPrepTimes.put("大麥克", 8);
-            mealPrepTimes.put("小麥克", 6);
-            mealPrepTimes.put("麥克", 7);
-            mealPrepTimes.put("薯條", 3);
-            mealPrepTimes.put("雞塊", 5);
-            mealPrepTimes.put("蘋果派", 4);
-            mealPrepTimes.put("玉米湯", 2);
-            mealPrepTimes.put("可樂", 1);
-            mealPrepTimes.put("舊東洋熱狗", 5);
-            mealPrepTimes.put("冰美式", 3);
+            mealPrepTimes.put("大麥克", 8 * 60);
+            mealPrepTimes.put("小麥克", 6 * 60);
+            mealPrepTimes.put("麥克", 7 * 60);
+            mealPrepTimes.put("薯條", 3 * 60);
+            mealPrepTimes.put("雞塊", 5 * 60);
+            mealPrepTimes.put("蘋果派", 4 * 60);
+            mealPrepTimes.put("玉米湯", 2 * 60);
+            mealPrepTimes.put("可樂", 1 * 60);
+            mealPrepTimes.put("舊東洋熱狗", 5 * 60);
+            mealPrepTimes.put("冰美式", 3 * 60);
             mealPrepTimes.put("大麥克預設", 0);
             mealPrepTimes.put("雞塊特餐", 0);
         }
@@ -74,14 +124,19 @@ public class DBRequest {
         try {
             JSONArray combosArray = queryCombos();
             System.out.println("=== 套餐資料調試 ===");
-            for (int i = 0; i < combosArray.length(); i++) {
-                JSONObject c = combosArray.getJSONObject(i);
-                String comboName = c.getString("combo_name");
-                String foodItems = c.getString("food_items");
+            LinkedHashMap<String, ArrayList<Integer>> comboMeals = parseComboMeals(combosArray);
+            for (Map.Entry<String, ArrayList<Integer>> entry : comboMeals.entrySet()) {
+                String comboName = entry.getKey();
+                ArrayList<Integer> mealIds = entry.getValue();
+                StringBuilder foodItems = new StringBuilder();
+                for (int i = 0; i < mealIds.size(); i++) {
+                    if (i > 0) foodItems.append(",");
+                    foodItems.append(mealIds.get(i));
+                }
                 System.out.println("  套餐: " + comboName + " | 食材: " + foodItems);
-                combos.put(comboName, foodItems);
+                combos.put(comboName, foodItems.toString());
             }
-            System.out.println("從資料庫成功載入 " + combosArray.length() + " 個套餐\n");
+            System.out.println("從資料庫成功載入 " + comboMeals.size() + " 個套餐\n");
         } catch (Exception e) {
             System.err.println("讀取套餐失敗: " + e.getMessage());
         }
@@ -195,7 +250,7 @@ public class DBRequest {
 
                 // duration
                 if (r.has("timeMinutes")) {
-                    try { int minutes = Integer.parseInt(r.optString("timeMinutes", "0")); step.put("duration_sec", minutes * 60); }
+                    try { int minutes = Integer.parseInt(r.optString("timeMinutes", "0")); step.put("duration_sec", minutes*3); }
                     catch (NumberFormatException ex) { step.put("duration_sec", r.optInt("timeMinutes", 0)); }
                 } else if (r.has("duration_sec")) {
                     step.put("duration_sec", r.optInt("duration_sec", 0));
@@ -247,6 +302,39 @@ public class DBRequest {
             return recipesOut;
         } catch (Exception e) {
             System.err.println("讀取資料庫食譜失敗: " + e.getMessage());
+            return new JSONArray();
+        }
+    }
+
+    /**
+     * 載入原料表 (ingredients)
+     */
+    public static JSONArray loadIngredients() {
+        try {
+            JSONObject response = httpGet(API_BASE + "/get_ingredients.php");
+            return response.getJSONArray("data");
+        } catch (Exception e) {
+            System.err.println("讀取原料表失敗: " + e.getMessage());
+            return new JSONArray();
+        }
+    }
+
+    /**
+     * BOM 自動解析來源 (沿用 loadRecipes)
+     */
+    public static JSONArray loadAllBOMs() {
+        return loadRecipes();
+    }
+
+    /**
+     * 專門讀取 McOS_mealCost 表作為 BOM 資料源
+     */
+    public static JSONArray loadBOMData() {
+        try {
+            JSONObject response = httpGet(API_BASE + "/get_mealcost.php");
+            return response.getJSONArray("data");
+        } catch (Exception e) {
+            System.err.println("讀取 BOM (mealCost) 失敗: " + e.getMessage());
             return new JSONArray();
         }
     }
@@ -323,25 +411,20 @@ public class DBRequest {
             mealMap.put(meal.getInt("meal_id"), meal);
         }
 
-        for (int i = 0; i < combos.length(); i++) {
-            JSONObject combo = combos.getJSONObject(i);
-            if (comboName.equals(combo.getString("combo_name"))) {
-                String foodItemsStr = combo.getString("food_items");
-                String[] mealIds = foodItemsStr.split(",");
-
-                JSONArray items = new JSONArray();
-                for (String mealIdStr : mealIds) {
-                    int mealId = Integer.parseInt(mealIdStr.trim());
-                    if (mealMap.containsKey(mealId)) {
-                        JSONObject meal = mealMap.get(mealId);
-                        JSONObject item = new JSONObject();
-                        item.put("item", meal.getString("meal_name"));
-                        item.put("prep_time", meal.getInt("prep_time"));
-                        items.put(item);
-                    }
+        LinkedHashMap<String, ArrayList<Integer>> comboMeals = parseComboMeals(combos);
+        if (comboMeals.containsKey(comboName)) {
+            ArrayList<Integer> mealIds = comboMeals.get(comboName);
+            JSONArray items = new JSONArray();
+            for (int mealId : mealIds) {
+                if (mealMap.containsKey(mealId)) {
+                    JSONObject meal = mealMap.get(mealId);
+                    JSONObject item = new JSONObject();
+                    item.put("item", meal.getString("meal_name"));
+                    item.put("prep_time", normalizePrepTimeSeconds(meal.getInt("prep_time")));
+                    items.put(item);
                 }
-                return items;
             }
+            return items;
         }
 
         return new JSONArray();

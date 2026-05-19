@@ -1,7 +1,7 @@
 <?php
 /**
- * 查詢 McOS_comboMeals 表的 API
- * Java GUI 通過這個接口讀取套餐定義
+ * 查詢 McOS_comboMeal_new_new / McOS_comboDetail_new_new 表的 API
+ * Java GUI 通過這個接口讀取套餐定義（多列對應同一套餐）
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -20,8 +20,11 @@ try {
     
     $conn->set_charset("utf8mb4");
     
-    // 查詢套餐定義表 (food_items 是逗號分隔的 meal_id)
-    $sql = "SELECT combo_id, combo_name, food_items FROM McOS_comboMeals ORDER BY combo_id ASC";
+    // 查詢套餐定義表（多列對應同一套餐）
+    $sql = "SELECT combo.comboName, combo.comboID, det.mealID "
+        . "FROM McOS_comboMeals_new_new AS combo "
+        . "JOIN McOS_comboDetail_new_new AS det ON combo.comboID = det.comboID "
+        . "ORDER BY combo.comboID ASC";
     $result = $conn->query($sql);
     
     if (!$result) {
@@ -35,7 +38,7 @@ try {
     
     $response = [
         'status' => 'success',
-        'message' => '成功查詢 McOS_comboMeals 表',
+    'message' => '成功查詢 McOS_comboMeals_new_new / McOS_comboDetail_new_new 表',
         'count' => count($data),
         'data' => $data,
         'timestamp' => date('Y-m-d H:i:s')

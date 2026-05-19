@@ -1,14 +1,12 @@
 package gui;
 
+import db.DBRequest;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 
 public class RecipeDialog extends JDialog {
     private JList<String> recipeList;
@@ -54,13 +52,17 @@ public class RecipeDialog extends JDialog {
     private void loadRecipes() {
         try {
             // load normalized recipes (each recipe has meal_id and steps[])
-            JSONArray recipes = loadRecipesLocal();
+            JSONArray recipes = DBRequest.loadRecipes();
 
             // group steps by meal_id
             recipesGroupedByMeal.clear();
             for (int i = 0; i < recipes.length(); i++) {
                 JSONObject r = recipes.getJSONObject(i);
                 int mealId = r.optInt("meal_id", -1);
+                String nameCandidate = r.optString("meal_name", "");
+                if (nameCandidate.isEmpty()) {
+                    nameCandidate = r.optString("recipe_name", "");
+                }
                 JSONArray steps = r.optJSONArray("steps");
                 if (mealId == -1) continue; // skip recipes without meal mapping
                 java.util.List<JSONObject> list = recipesGroupedByMeal.getOrDefault(mealId, new java.util.ArrayList<>());
@@ -68,14 +70,30 @@ public class RecipeDialog extends JDialog {
                     for (int j = 0; j < steps.length(); j++) list.add(steps.getJSONObject(j));
                 }
                 recipesGroupedByMeal.put(mealId, list);
+                if (!nameCandidate.isEmpty()) {
+                    mealNames.putIfAbsent(mealId, nameCandidate);
+                }
             }
 
-            // use meal ids discovered in recipesGroupedByMeal
-            mealNames.clear();
+            // try to obtain meal names from API to display nicer titles
             mealIdOrder.clear();
-            for (Integer mid : recipesGroupedByMeal.keySet()) {
-                if (!mealIdOrder.contains(mid)) mealIdOrder.add(mid);
-                mealNames.putIfAbsent(mid, "");
+            try {
+                JSONArray meals = DBRequest.queryMeals();
+                for (int i = 0; i < meals.length(); i++) {
+                    JSONObject m = meals.getJSONObject(i);
+                    int mid = m.optInt("meal_id", -1);
+                    String mname = m.optString("meal_name", "");
+                    if (mid != -1) {
+                        mealNames.put(mid, mname);
+                        if (!mealIdOrder.contains(mid)) mealIdOrder.add(mid);
+                        recipesGroupedByMeal.putIfAbsent(mid, new java.util.ArrayList<>());
+                    }
+                }
+            } catch (Exception ex) {
+                for (Integer mid : recipesGroupedByMeal.keySet()) {
+                    if (!mealIdOrder.contains(mid)) mealIdOrder.add(mid);
+                    mealNames.putIfAbsent(mid, "");
+                }
             }
 
             // if mealIdOrder is empty (no meals from API), use grouped keys
@@ -100,14 +118,6 @@ public class RecipeDialog extends JDialog {
         }
     }
 
-    private JSONArray loadRecipesLocal() throws Exception {
-        java.nio.file.Path path = Paths.get("DB", "recipe.json");
-        if (!Files.exists(path)) {
-            return new JSONArray();
-        }
-        String content = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
-        return new JSONArray(content);
-    }
 
     private void showStepsFor(int idx) {
         stepModel.setRowCount(0);
