@@ -36,8 +36,13 @@ public class DBRequest {
     private static final String WORKERS_URL = API_BASE + "/get_workers.php";
     private static final String EQUIPMENT_URL = API_BASE + "/get_equipment.php";
     private static final String RECIPE_URL = API_BASE + "/get_recipes.php";
+    // Additional APIs (ensure backend provides these endpoints)
+    private static final String CUSTOMERS_URL = API_BASE + "/get_customers.php";
+    private static final String CONSUME_INVENTORY_URL = API_BASE + "/consume_inventory.php";
+    private static final String PURCHASE_INGREDIENT_URL = API_BASE + "/purchase_ingredient.php";
+    private static final String ORDER_HISTORY_URL = API_BASE + "/record_order.php";
 
-    private static int normalizePrepTimeSeconds(int prepTime) {
+private static int normalizePrepTimeSeconds(int prepTime) {
         if (prepTime <= 0) {
             return prepTime;
         }
@@ -87,15 +92,122 @@ public class DBRequest {
         return comboMeals;
     }
 
+    private static LinkedHashMap<String, ArrayList<JSONObject>> buildMealCostMap() {
+        LinkedHashMap<String, ArrayList<JSONObject>> mealCostMap = new LinkedHashMap<>();
+        try {
+            JSONArray bomData = loadBOMData();
+            JSONArray meals = queryMeals();
+
+            Map<Integer, String> mealNameMap = new HashMap<>();
+            for (int i = 0; i < meals.length(); i++) {
+                JSONObject m = meals.getJSONObject(i);
+                int mealId = m.optInt("meal_id", -1);
+                if (mealId > 0) {
+                    mealNameMap.put(mealId, m.optString("meal_name", ""));
+                }
+            }
+
+            for (int i = 0; i < bomData.length(); i++) {
+                JSONObject row = bomData.getJSONObject(i);
+                int mealId = row.optInt("mealID", row.optInt("meal_id", -1));
+                int ingId = row.optInt("ingID", row.optInt("ing_id", -1));
+                double qty = row.optDouble("qty", 0);
+                if (mealId <= 0 || ingId <= 0 || qty <= 0) {
+                    continue;
+                }
+                String mealName = mealNameMap.getOrDefault(mealId, "");
+                if (mealName.isEmpty()) {
+                    continue;
+                }
+                ArrayList<JSONObject> list = mealCostMap.getOrDefault(mealName, new ArrayList<>());
+                JSONObject item = new JSONObject();
+                item.put("ing_id", ingId);
+                item.put("qty", qty);
+                list.add(item);
+                mealCostMap.put(mealName, list);
+            }
+        } catch (Exception e) {
+            System.err.println("buildMealCostMap error: " + e.getMessage());
+        }
+        return mealCostMap;
+    }
+
+    private static JSONArray buildConsumptionPayload(JSONArray itemNames) {
+        LinkedHashMap<String, ArrayList<JSONObject>> mealCostMap = buildMealCostMap();
+        LinkedHashMap<Integer, Double> totals = new LinkedHashMap<>();
+
+        for (int i = 0; i < itemNames.length(); i++) {
+            String mealName = itemNames.optString(i, "");
+            if (mealName.isEmpty() || !mealCostMap.containsKey(mealName)) {
+                continue;
+            }
+            for (JSONObject item : mealCostMap.get(mealName)) {
+                int ingId = item.optInt("ing_id", -1);
+                double qty = item.optDouble("qty", 0);
+                if (ingId <= 0 || qty <= 0) {
+                    continue;
+                }
+                totals.put(ingId, totals.getOrDefault(ingId, 0.0) + qty);
+            }
+        }
+
+        JSONArray payload = new JSONArray();
+        for (Map.Entry<Integer, Double> entry : totals.entrySet()) {
+            JSONObject item = new JSONObject();
+            item.put("ing_id", entry.getKey());
+            item.put("qty", entry.getValue());
+            payload.put(item);
+        }
+        return payload;
+    }
+
+    private static LinkedHashMap<String, Integer> buildRecipePrepTimeMap() {
+        LinkedHashMap<String, Integer> recipePrepTimes = new LinkedHashMap<>();
+        JSONArray recipes = loadRecipes();
+        for (int i = 0; i < recipes.length(); i++) {
+            JSONObject recipe = recipes.getJSONObject(i);
+            String mealName = recipe.optString("meal_name", "");
+            if (mealName.isEmpty()) {
+                mealName = recipe.optString("recipe_name", "");
+            }
+            if (mealName.isEmpty()) {
+                continue;
+            }
+            JSONArray steps = recipe.optJSONArray("steps");
+            if (steps == null || steps.length() == 0) {
+                continue;
+            }
+            int total = 0;
+            for (int s = 0; s < steps.length(); s++) {
+                total += steps.getJSONObject(s).optInt("duration_sec", 0);
+            }
+            if (total > 0) {
+                recipePrepTimes.put(mealName, total);
+            }
+        }
+        return recipePrepTimes;
+    }
+
     public static LinkedHashMap<String, Integer> loadMeals() {
         LinkedHashMap<String, Integer> mealPrepTimes = new LinkedHashMap<>();
         try {
+            LinkedHashMap<String, Integer> recipePrepTimes = buildRecipePrepTimeMap();
             JSONArray meals = queryMeals();
             System.out.println("=== 餐點資料調試 ===");
             for (int i = 0; i < meals.length(); i++) {
                 JSONObject m = meals.getJSONObject(i);
                 String mealName = m.getString("meal_name");
-                int prepTime = normalizePrepTimeSeconds(m.getInt("prep_time"));
+                int prepTime = recipePrepTimes.getOrDefault(mealName, 0);
+                if (prepTime <= 0) {
+                    int rawPrepTime = m.optInt("prep_time", -1);
+                    if (rawPrepTime > 0) {
+                        prepTime = normalizePrepTimeSeconds(rawPrepTime);
+                    }
+                }
+                if (prepTime <= 0) {
+                    System.err.println("餐點缺少食譜步驟時間，改用預設值 5 分鐘: " + mealName);
+                    prepTime = normalizePrepTimeSeconds(5);
+                }
                 System.out.println("  餐點: " + mealName + " | 準備時間(秒): " + prepTime);
                 mealPrepTimes.put(mealName, prepTime);
             }
@@ -159,7 +271,7 @@ public class DBRequest {
      * 載入廚房設備，完全比照 loadWorkers 模式，直接走線上 API 讀取
      * 回傳 JSONArray of equipment objects
      */
-    public static JSONArray loadKitchenEquipment() {
+     public static JSONArray loadKitchenEquipment() {
         try {
             JSONObject response = httpGet(EQUIPMENT_URL);
             JSONArray data = response.getJSONArray("data");
@@ -195,6 +307,7 @@ public class DBRequest {
             return new JSONArray();
         }
     }
+
 
     /**
      * 載入食譜，完全比照 loadWorkers 模式，直接走線上 API 讀取
@@ -306,12 +419,12 @@ public class DBRequest {
         }
     }
 
-    /**
-     * 載入原料表 (ingredients)
-     */
+
+    // 在 DBRequest.java 中新增
     public static JSONArray loadIngredients() {
         try {
-            JSONObject response = httpGet(API_BASE + "/get_ingredients.php");
+            // 請確保你的伺服器上有 get_ingredients.php
+            JSONObject response = httpGet(API_BASE + "/get_ingredients.php"); 
             return response.getJSONArray("data");
         } catch (Exception e) {
             System.err.println("讀取原料表失敗: " + e.getMessage());
@@ -319,25 +432,27 @@ public class DBRequest {
         }
     }
 
-    /**
-     * BOM 自動解析來源 (沿用 loadRecipes)
-     */
+    // --- 【新增】BOM 自動解析功能 ---
+    // 直接沿用 loadRecipes() 的資料源，供 GUI 進行解析與顯示
     public static JSONArray loadAllBOMs() {
         return loadRecipes();
     }
+    // ----------------------------
 
     /**
      * 專門讀取 McOS_mealCost 表作為 BOM 資料源
      */
     public static JSONArray loadBOMData() {
         try {
-            JSONObject response = httpGet(API_BASE + "/get_mealcost.php");
+            // 注意：請確保你有對應的 get_mealcost.php 檔案在伺服器上
+            JSONObject response = httpGet(API_BASE + "/get_mealcost.php"); 
             return response.getJSONArray("data");
         } catch (Exception e) {
             System.err.println("讀取 BOM (mealCost) 失敗: " + e.getMessage());
             return new JSONArray();
         }
     }
+
 
     /**
      * 根據餐點名稱尋找食譜，若找不到回傳 null
@@ -395,13 +510,73 @@ public class DBRequest {
         return response.getJSONArray("data");
     }
 
+        /**
+     * 查詢指定日期消耗量，並合併當前庫存狀態
+     */
+    public static JSONArray getConsumptionWithInventory(String date) throws Exception {
+        // 這裡假設後端有寫一個 PHP 整合 API (例如 get_consumption_report.php)
+        // 該 API 內部會執行 SQL JOIN 或將兩張 View 的結果在 PHP 端合併後回傳
+        String url = API_BASE + "/get_consumption_report.php?date=" + date;
+        JSONObject response = httpGet(url);
+        return response.getJSONArray("data");
+    }
+
+        /**
+     * 查詢指定日期的原料消耗統計
+     * @param date 日期格式 YYYY-MM-DD
+     */
+    public static JSONArray getDailyConsumption(String date) throws Exception {
+        // 假設您的後端有一個 API 可以根據日期篩選 View_Daily_Total_Consumption
+        // 例如: get_daily_consumption.php?date=2026-04-22
+        String url = API_BASE + "/get_daily_consumption.php?date=" + date;
+        JSONObject response = httpGet(url);
+        if (response.has("data")) {
+            return response.getJSONArray("data");
+        }
+        return new JSONArray();
+    }
+
+    public static JSONArray loadCustomers() {
+        try {
+            JSONObject response = httpGet(CUSTOMERS_URL);
+            if (response.has("data")) {
+                return response.getJSONArray("data");
+            }
+        } catch (Exception e) {
+            System.err.println("讀取顧客資料失敗: " + e.getMessage());
+        }
+        return new JSONArray();
+    }
+
+    public static JSONObject consumeInventory(JSONArray itemNames, String orderId, String completedAt) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("order_id", orderId);
+        payload.put("completed_at", completedAt);
+        payload.put("items", itemNames);
+        payload.put("consumptions", buildConsumptionPayload(itemNames));
+        return httpPost(CONSUME_INVENTORY_URL, payload.toString());
+    }
+
+    public static JSONObject recordOrderHistory(JSONObject orderInfo) throws Exception {
+        JSONObject payload = new JSONObject(orderInfo.toString());
+        return httpPost(ORDER_HISTORY_URL, payload.toString());
+    }
+
+    public static JSONObject purchaseIngredient(String ingId, double qty) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("ing_id", ingId);
+        payload.put("qty", qty);
+        return httpPost(PURCHASE_INGREDIENT_URL, payload.toString());
+    }
+
     /**
      * 根據套餐名稱查詢套餐食材
-     * food_items 是逗號分隔的 meal_id，需要查詢 McOS_meal 取得 prep_time
+     * food_items 是逗號分隔的 meal_id，prep_time 來自食譜步驟加總
      * @param comboName 套餐名稱
      * @return JSONArray of food items with {item, prep_time}
      */
     public static JSONArray getComboItems(String comboName) throws Exception {
+        LinkedHashMap<String, Integer> recipePrepTimes = buildRecipePrepTimeMap();
         JSONArray combos = queryCombos();
         JSONArray allMeals = queryMeals();
 
@@ -419,8 +594,19 @@ public class DBRequest {
                 if (mealMap.containsKey(mealId)) {
                     JSONObject meal = mealMap.get(mealId);
                     JSONObject item = new JSONObject();
-                    item.put("item", meal.getString("meal_name"));
-                    item.put("prep_time", normalizePrepTimeSeconds(meal.getInt("prep_time")));
+                    String mealName = meal.getString("meal_name");
+                    item.put("item", mealName);
+                    int prepTime = recipePrepTimes.getOrDefault(mealName, 0);
+                    if (prepTime <= 0) {
+                        int rawPrepTime = meal.optInt("prep_time", -1);
+                        if (rawPrepTime > 0) {
+                            prepTime = normalizePrepTimeSeconds(rawPrepTime);
+                        }
+                    }
+                    if (prepTime <= 0) {
+                        prepTime = normalizePrepTimeSeconds(5);
+                    }
+                    item.put("prep_time", prepTime);
                     items.put(item);
                 }
             }
@@ -430,6 +616,7 @@ public class DBRequest {
         return new JSONArray();
     }
 
+    
     /**
      * 新增套餐
      * @param comboName 套餐名稱
@@ -497,6 +684,15 @@ public class DBRequest {
             return new JSONObject(response.toString().trim());
         }
     }
+
+
+    public static JSONObject getComboBomExplosion() throws Exception {
+    // 🎯 直接複製這行！使用你們專案統一的 API_BASE 變數，就不會走錯門牌了
+    String url = API_BASE + "/get_combo_bom_explosion.php"; 
+    
+    JSONObject response = httpGet(url);
+    return response;
+}
 
     // CRUD_URL is retained for compatibility with other modules that may build URLs directly.
     public static String getCrudUrl() {

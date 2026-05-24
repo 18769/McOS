@@ -104,7 +104,7 @@ class McOSScheduler:
         for equip in self.equipments:
             equip["status"] = ""
 
-    def _find_equipment_for_task(self, task, earliest_time):
+    def _find_equipment_for_task(self, task, earliest_time, equipment_usage_counts=None):
         equipment_type = str(task.get("equipment_type", "")).strip().lower()
         if not equipment_type:
             return None
@@ -134,9 +134,16 @@ class McOSScheduler:
         if not matching:
             return None
 
+        if equipment_usage_counts is None:
+            equipment_usage_counts = {}
+
         def sort_key(equip):
             eid = equip.get("equipmentID") or ""
-            return (self.equipment_available.get(eid, 0), eid)
+            return (
+                equipment_usage_counts.get(str(eid), 0),
+                self.equipment_available.get(eid, 0),
+                eid
+            )
 
         selected = min(matching, key=sort_key)
         selected_id = selected.get("equipmentID")
@@ -261,6 +268,25 @@ class McOSScheduler:
                 eid = str(eid)
                 self.equipment_available[eid] = max(self.equipment_available.get(eid, 0), expected_at)
 
+        # Build current equipment usage counts based on each worker's current task
+        worker_current_tasks = {}
+        for task in allocated_tasks:
+            worker_id = task.get("worker_id")
+            if worker_id is None:
+                continue
+            expected_at = task.get("expected_at", float('inf'))
+            if worker_id not in worker_current_tasks or expected_at < worker_current_tasks[worker_id].get("expected_at", float('inf')):
+                worker_current_tasks[worker_id] = task
+
+        equipment_usage_counts = {}
+        workers_with_current_task = set()
+        for worker_id, task in worker_current_tasks.items():
+            workers_with_current_task.add(worker_id)
+            equipment_id = task.get("equipment_id")
+            if equipment_id:
+                equipment_id = str(equipment_id)
+                equipment_usage_counts[equipment_id] = equipment_usage_counts.get(equipment_id, 0) + 1
+
         tasks_to_schedule = new_tasks
         self.pending_queue = allocated_tasks + tasks_to_schedule
         
@@ -285,6 +311,7 @@ class McOSScheduler:
             
             worker_start = self.worker_available[selected_worker]
             current_time = worker_start
+            worker_has_current = selected_worker in workers_with_current_task
 
             for task in tasks:
                 prep_time = task.get("prep_time", 5)
@@ -294,7 +321,7 @@ class McOSScheduler:
                 selected_equipment = None
                 equipment_start = current_time
                 if task.get("equipment_type"):
-                    match = self._find_equipment_for_task(task, current_time)
+                    match = self._find_equipment_for_task(task, current_time, equipment_usage_counts)
                     if match is not None:
                         selected_equipment, selected_equipment_id, equipment_start = match
                         start_time = max(current_time, equipment_start)
@@ -314,9 +341,16 @@ class McOSScheduler:
                     task["equipment_status"] = status_text
                     
                     self.equipment_available[selected_equipment_id] = finish_time
+
+                    if not worker_has_current:
+                        equipment_usage_counts[selected_equipment_id] = equipment_usage_counts.get(selected_equipment_id, 0) + 1
                 
                 # 【修復：補回你遺失的時間推進邏輯！】
                 current_time = finish_time
+
+                if not worker_has_current:
+                    worker_has_current = True
+                    workers_with_current_task.add(selected_worker)
 
             self.worker_available[selected_worker] = current_time
 
@@ -333,10 +367,12 @@ class McOSScheduler:
                     worker_current_tasks[worker_id] = task
         
         equipment_display_map = {}
+        equipment_usage_counts = {}
         for worker_id, task in worker_current_tasks.items():
             equipment_id = task.get("equipment_id")
             if equipment_id:
                 equipment_id = str(equipment_id)
+                equipment_usage_counts[equipment_id] = equipment_usage_counts.get(equipment_id, 0) + 1
                 expected_at = task.get("expected_at", float('inf'))
                 if equipment_id not in equipment_display_map or expected_at < equipment_display_map[equipment_id]["expected_at"]:
                     equipment_display_map[equipment_id] = {
@@ -348,7 +384,8 @@ class McOSScheduler:
         for equipment_id, display_info in equipment_display_map.items():
             worker_id = display_info["worker_id"]
             task = display_info["task"]
-            status_text = f"{self._worker_label(worker_id)}:{task.get('item', 'unknown_item')}|{task.get('id')}"
+            user_count = equipment_usage_counts.get(str(equipment_id), 1)
+            status_text = f"使用中:{user_count}人"
             for equip in self.equipments:
                 if str(equip.get("equipmentID")) == str(equipment_id):
                     equip["status"] = status_text

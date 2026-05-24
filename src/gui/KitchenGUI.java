@@ -38,6 +38,9 @@ public class KitchenGUI {
     private ArrayList<JSONObject> workers = new ArrayList<>();
     private LinkedHashMap<Integer, String> workerNames = new LinkedHashMap<>();
     private ArrayList<Integer> workerIds = new ArrayList<>();
+    private ArrayList<JSONObject> customers = new ArrayList<>();
+    private JSONObject currentCustomer = null;
+    private JLabel customerLabel;
     private final HashSet<String> inProgressTasks = new HashSet<>();
     private final Object inProgressLock = new Object();
     private final LinkedHashMap<Integer, WorkerTaskState> activeWorkersState = new LinkedHashMap<>();
@@ -68,10 +71,14 @@ public class KitchenGUI {
     applyRecipePrepTimes();
     syncEquipmentSnapshot(); // 同步設備快照
     applyWorkerRoster(DBRequest.loadWorkerRoster()); // 載入員工資料
+    loadCustomers();
+    if (!customers.isEmpty()) {
+        currentCustomer = customers.get(0);
+    }
 
         // --- 1. 全域外觀設定 ---
         frame = new JFrame("McOS 智慧廚房 - 專業出餐系統");
-        frame.setSize(1200, 750); // 維持大小
+    frame.setSize(1360, 820); // 調整為較寬鬆的版面
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.getContentPane().setBackground(BG_DARK);
 
@@ -87,76 +94,103 @@ public class KitchenGUI {
         appTitle.setForeground(ACCENT_GOLD);
         topBar.add(appTitle, BorderLayout.WEST);
 
-        JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 15, 0));
+        JPanel actionPanel = new JPanel();
+        actionPanel.setLayout(new BoxLayout(actionPanel, BoxLayout.Y_AXIS));
         actionPanel.setBackground(new Color(18, 18, 20));
+
+        JPanel actionRow1 = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
+        actionRow1.setBackground(new Color(18, 18, 20));
+        JPanel actionRow2 = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
+        actionRow2.setBackground(new Color(18, 18, 20));
 
         statusLabel = new JLabel("● 系統狀態: 檢測中");
         statusLabel.setForeground(TEXT_SECONDARY);
         statusLabel.setFont(new Font("Microsoft JhengHei", Font.PLAIN, 14));
-        actionPanel.add(statusLabel);
+        actionRow1.add(statusLabel);
 
-    JButton equipBtn = createFlatButton("設備", PANEL_BG, TEXT_PRIMARY);
-    equipBtn.addActionListener(e -> {
-        EquipmentDialog dlg = new EquipmentDialog(frame);
-        dlg.setLocationRelativeTo(frame);
-        dlg.setVisible(true);
-    });
-    actionPanel.add(equipBtn);
+        customerLabel = new JLabel(buildCustomerLabel());
+        customerLabel.setForeground(TEXT_SECONDARY);
+        customerLabel.setFont(new Font("Microsoft JhengHei", Font.PLAIN, 14));
+        actionRow1.add(customerLabel);
 
-    JButton recipeBtn = createFlatButton("查看食譜", PANEL_BG, TEXT_PRIMARY);
-    recipeBtn.addActionListener(e -> {
-        RecipeDialog rd = new RecipeDialog(frame);
-        rd.setLocationRelativeTo(frame);
-        rd.setVisible(true);
-    });
-    actionPanel.add(recipeBtn);
+        JButton customerBtn = createFlatButton("選擇顧客", PANEL_BG, TEXT_PRIMARY);
+        customerBtn.addActionListener(e -> openCustomerDialog());
+        actionRow1.add(customerBtn);
 
-    JLabel algoLabel = new JLabel("排程策略:");
-    algoLabel.setForeground(TEXT_SECONDARY);
-    algoLabel.setFont(new Font("Microsoft JhengHei", Font.BOLD, 13));
-    actionPanel.add(algoLabel);
+        JLabel algoLabel = new JLabel("排程策略:");
+        algoLabel.setForeground(TEXT_SECONDARY);
+        algoLabel.setFont(new Font("Microsoft JhengHei", Font.BOLD, 13));
+        actionRow1.add(algoLabel);
 
-    algoSelector = new JComboBox<>(new String[]{"FCFS", "SJF", "AGING"});
-    algoSelector.setFont(new Font("Microsoft JhengHei", Font.BOLD, 13));
-    algoSelector.setBackground(PANEL_BG);
-    algoSelector.setForeground(TEXT_PRIMARY);
-    algoSelector.setFocusable(false);
-    algoSelector.addActionListener(e -> switchSchedulerMode((String) algoSelector.getSelectedItem()));
-    actionPanel.add(algoSelector);
+        algoSelector = new JComboBox<>(new String[]{"FCFS", "SJF", "AGING"});
+        algoSelector.setFont(new Font("Microsoft JhengHei", Font.BOLD, 13));
+        algoSelector.setBackground(PANEL_BG);
+        algoSelector.setForeground(TEXT_PRIMARY);
+        algoSelector.setFocusable(false);
+        algoSelector.addActionListener(e -> switchSchedulerMode((String) algoSelector.getSelectedItem()));
+        actionRow1.add(algoSelector);
 
-    takeoutBox = new JCheckBox("外帶模式");
+        takeoutBox = new JCheckBox("外帶模式");
         takeoutBox.setForeground(TEXT_PRIMARY);
         takeoutBox.setBackground(new Color(18, 18, 20));
         takeoutBox.setFont(new Font("Microsoft JhengHei", Font.BOLD, 15));
         takeoutBox.setFocusPainted(false);
-        actionPanel.add(takeoutBox);
+        actionRow1.add(takeoutBox);
+
+        JButton equipBtn = createFlatButton("設備", PANEL_BG, TEXT_PRIMARY);
+        equipBtn.addActionListener(e -> {
+            EquipmentDialog dlg = new EquipmentDialog(frame);
+            dlg.setLocationRelativeTo(frame);
+            dlg.setVisible(true);
+        });
+        actionRow2.add(equipBtn);
+
+        JButton recipeBtn = createFlatButton("查看食譜", PANEL_BG, TEXT_PRIMARY);
+        recipeBtn.addActionListener(e -> {
+            RecipeDialog rd = new RecipeDialog(frame);
+            rd.setLocationRelativeTo(frame);
+            rd.setVisible(true);
+        });
+        actionRow2.add(recipeBtn);
+
+        JButton ingredientBtn = createFlatButton("庫存/採買", PANEL_BG, TEXT_PRIMARY);
+        ingredientBtn.addActionListener(e -> {
+            IngredientDialog dlg = new IngredientDialog(frame);
+            dlg.setLocationRelativeTo(frame);
+            dlg.setVisible(true);
+        });
+        actionRow2.add(ingredientBtn);
 
         scriptBtn = createFlatButton("📂 載入腳本", new Color(0, 120, 215), Color.WHITE);
         scriptingManager = new scripting(this, frame, scriptBtn, statusLabel, takeoutBox);
         scriptBtn.addActionListener(e -> scriptingManager.handleScriptButton());
-        actionPanel.add(scriptBtn);
+        actionRow2.add(scriptBtn);
 
         JButton clearBtn = createFlatButton("🗑️ 清空暫存", new Color(220, 53, 69), Color.WHITE);
         clearBtn.addActionListener(e -> {
             orderBuffer.clear();
             updateWaitPanel();
         });
-        actionPanel.add(clearBtn);
+        actionRow2.add(clearBtn);
 
         JButton runBtn = createFlatButton("🚀 送出排程", ACCENT_GOLD, Color.BLACK);
         runBtn.addActionListener(e -> processOrders());
-        actionPanel.add(runBtn);
+        actionRow2.add(runBtn);
+
+        actionPanel.add(actionRow1);
+        actionPanel.add(Box.createVerticalStrut(8));
+        actionPanel.add(actionRow2);
 
         topBar.add(actionPanel, BorderLayout.EAST);
 
         // --- 3. 主面板配置 (Main Content) ---
-        JPanel mainContent = new JPanel(new BorderLayout(15, 0));
+    JPanel mainContent = new JPanel(new BorderLayout(20, 0));
         mainContent.setBackground(BG_DARK);
         mainContent.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
 
         // [左側] 點餐網格區 (Grid Menu)
-        JPanel menuSection = createSectionPanel("點餐選項");
-        menuSection.setPreferredSize(new Dimension(300, 0));
+    JPanel menuSection = createSectionPanel("點餐選項");
+    menuSection.setPreferredSize(new Dimension(320, 0));
 
         // 改用 BoxLayout 垂直排列，方便分組
         JPanel menuContentPanel = new JPanel();
@@ -249,7 +283,7 @@ public class KitchenGUI {
         mainContent.add(menuSection, BorderLayout.WEST);
 
         // [右側] 監控區 (Monitors)
-        JPanel monitorsPanel = new JPanel(new GridLayout(1, 3, 15, 0));
+    JPanel monitorsPanel = new JPanel(new GridLayout(2, 2, 15, 15));
         monitorsPanel.setBackground(BG_DARK);
 
         waitPanel = new JPanel();
@@ -262,15 +296,10 @@ public class KitchenGUI {
         prodPanel.setBackground(PANEL_BG);
         monitorsPanel.add(createScrollPanel(prodPanel, "【2】 廚房製作"));
 
-        JPanel dataPanel = new JPanel(new GridLayout(2, 1, 0, 15));
-        dataPanel.setBackground(BG_DARK);
-
         scheduleArea = new JTextArea();
         historyArea = new JTextArea();
-        dataPanel.add(createScrollText(scheduleArea, "【3】 智慧排程"));
-        dataPanel.add(createScrollText(historyArea, "【4】 完成紀錄"));
-
-        monitorsPanel.add(dataPanel);
+    monitorsPanel.add(createScrollText(scheduleArea, "【3】 智慧排程"));
+    monitorsPanel.add(createScrollText(historyArea, "【4】 完成紀錄"));
         mainContent.add(monitorsPanel, BorderLayout.CENTER);
 
         frame.setLayout(new BorderLayout());
@@ -413,6 +442,19 @@ public class KitchenGUI {
 
     private int getDefaultPrepTime(String item) {
         return mealPrepTimes.getOrDefault(item, 5);
+    }
+
+    private int resolveTaskPrepTime(JSONObject task) {
+        String mealName = task.optString("meal_name", task.optString("item", ""));
+        int prepTime = task.optInt("prep_time", 0);
+        if (prepTime <= 0) {
+            prepTime = getRecipeOrDefaultPrepTime(mealName);
+        }
+        if (prepTime <= 0) {
+            prepTime = 5;
+        }
+        task.put("prep_time", prepTime);
+        return prepTime;
     }
 
     private LinkedHashMap<String, JSONObject> loadRecipesFromApi() {
@@ -559,6 +601,7 @@ public class KitchenGUI {
         if (orderBuffer.isEmpty())
             return;
         
+        String scheduledAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         JSONArray ordersToSend = new JSONArray();
         System.out.println("📋 提交訂單組合：");
         
@@ -569,11 +612,14 @@ public class KitchenGUI {
             int prepTime = order.optInt("prep_time", 0);
             
             int itemOrderId = orderIdCounter++;
+            JSONArray itemNames = new JSONArray();
             
+            boolean isCombo = false;
             try {
                 JSONArray comboItems = DBRequest.getComboItems(itemName);
+                isCombo = comboItems.length() > 0;
                 
-                if (comboItems.length() > 0) {
+                if (isCombo) {
                     System.out.println("  📦 套餐: " + itemName + " (" + comboItems.length() + " 項) - 訂單 #" + itemOrderId);
                     JSONObject orderObj = new JSONObject();
                     orderObj.put("id", itemOrderId);
@@ -584,6 +630,7 @@ public class KitchenGUI {
                     for (int j = 0; j < comboItems.length(); j++) {
                         JSONObject subItem = comboItems.getJSONObject(j);
                         String subName = subItem.getString("item");
+                        itemNames.put(subName);
                         
                         JSONObject itemObj = new JSONObject();
                         itemObj.put("item", subName);
@@ -605,6 +652,7 @@ public class KitchenGUI {
                     
                 } else {
                     System.out.println("  🍔 單項: " + itemName + " - 訂單 #" + itemOrderId);
+                    itemNames.put(itemName);
                     JSONObject orderObj = new JSONObject();
                     orderObj.put("id", itemOrderId);
                     orderObj.put("item", itemName);
@@ -638,6 +686,13 @@ public class KitchenGUI {
             itemInfo.put("total_tasks", 1); 
             itemInfo.put("remaining_tasks", 1);
             itemInfo.put("is_takeout", isTakeout);
+            itemInfo.put("scheduled_at", scheduledAt);
+            itemInfo.put("items", itemNames);
+            itemInfo.put("is_combo", isCombo);
+            if (currentCustomer != null) {
+                itemInfo.put("customer_id", currentCustomer.optString("customerID", currentCustomer.optString("customer_id", currentCustomer.optString("id", ""))));
+                itemInfo.put("customer_name", currentCustomer.optString("name", currentCustomer.optString("customer_name", "")));
+            }
             orderRegistry.put(itemOrderId, itemInfo);
         }
         
@@ -685,7 +740,7 @@ public class KitchenGUI {
                     continue;
                 }
                 state.remaining -= 1;
-                int progress = Math.max(0, state.task.getInt("prep_time") - state.remaining);
+                int progress = Math.max(0, resolveTaskPrepTime(state.task) - state.remaining);
                 SwingUtilities.invokeLater(() -> state.bar.setValue(progress));
 
                 if (state.remaining <= 0) {
@@ -761,7 +816,7 @@ public class KitchenGUI {
         String rawMealName = task.optString("meal_name", task.getString("item"));
         String name = rawMealName.replaceAll("_\\d+$", ""); 
         
-        int seconds = task.getInt("prep_time");
+    int seconds = resolveTaskPrepTime(task);
         int id = task.getInt("id");
         
         boolean isTakeout = task.optBoolean("is_takeout", false);
@@ -839,10 +894,14 @@ public class KitchenGUI {
 
             if (orderCompleted) {
                 String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-                String orderName = orderRegistry.get(id).getString("name");
+                JSONObject orderInfo = orderRegistry.get(id);
+                String orderName = orderInfo != null ? orderInfo.optString("name", "") : "";
                 String record = "[" + time + "] ✅ 訂單 #" + id + " 完成: " + orderName;
                 addHistoryRecord(record);
-                orderRegistry.remove(id);
+                if (orderInfo != null) {
+                    handleOrderCompletion(orderInfo, id);
+                    orderRegistry.remove(id);
+                }
             }
 
             // Update schedule display with the queue
@@ -942,6 +1001,98 @@ public class KitchenGUI {
             }
             scheduleArea.setText(sb.toString());
         });
+    }
+
+    private void loadCustomers() {
+        customers.clear();
+        try {
+            JSONArray data = DBRequest.loadCustomers();
+            for (int i = 0; i < data.length(); i++) {
+                customers.add(data.getJSONObject(i));
+            }
+        } catch (Exception e) {
+            System.err.println("載入顧客失敗: " + e.getMessage());
+        }
+    }
+
+    private String buildCustomerLabel() {
+        if (currentCustomer == null) {
+            return "顧客: 未選";
+        }
+        String name = currentCustomer.optString("name", currentCustomer.optString("customer_name", ""));
+        if (name.isEmpty()) {
+            name = "未命名顧客";
+        }
+        return "顧客: " + name;
+    }
+
+    private void openCustomerDialog() {
+        if (customers.isEmpty()) {
+            loadCustomers();
+        }
+        if (customers.isEmpty()) {
+            JOptionPane.showMessageDialog(frame, "沒有顧客資料", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String[] options = new String[customers.size()];
+        for (int i = 0; i < customers.size(); i++) {
+            JSONObject c = customers.get(i);
+            String name = c.optString("name", c.optString("customer_name", "顧客" + (i + 1)));
+            String id = c.optString("customerID", c.optString("customer_id", c.optString("id", "")));
+            options[i] = id.isEmpty() ? name : name + " (#" + id + ")";
+        }
+        String selected = (String) JOptionPane.showInputDialog(
+                frame,
+                "選擇顧客",
+                "顧客列表",
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                options,
+                options[0]);
+        if (selected == null) {
+            return;
+        }
+        for (int i = 0; i < options.length; i++) {
+            if (options[i].equals(selected)) {
+                currentCustomer = customers.get(i);
+                break;
+            }
+        }
+        customerLabel.setText(buildCustomerLabel());
+    }
+
+    private void handleOrderCompletion(JSONObject orderInfo, int orderId) {
+        JSONObject payload = new JSONObject();
+        payload.put("order_id", orderId);
+        payload.put("order_name", orderInfo.optString("name", ""));
+    payload.put("is_combo", orderInfo.optBoolean("is_combo", false));
+        payload.put("scheduled_at", orderInfo.optString("scheduled_at", ""));
+        payload.put("completed_at", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+        payload.put("is_takeout", orderInfo.optBoolean("is_takeout", false));
+        if (orderInfo.has("customer_id")) {
+            payload.put("customer_id", orderInfo.optString("customer_id", ""));
+        }
+        if (orderInfo.has("customer_name")) {
+            payload.put("customer_name", orderInfo.optString("customer_name", ""));
+        }
+        JSONArray items = orderInfo.optJSONArray("items");
+        if (items != null) {
+            payload.put("items", items);
+        }
+
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() {
+                try {
+                    JSONArray itemNames = items != null ? items : new JSONArray();
+                    DBRequest.consumeInventory(itemNames, String.valueOf(orderId), payload.optString("completed_at", ""));
+                    DBRequest.recordOrderHistory(payload);
+                } catch (Exception e) {
+                    System.err.println("完成訂單 API 失敗: " + e.getMessage());
+                }
+                return null;
+            }
+        }.execute();
     }
 
     private void switchSchedulerMode(String mode) {

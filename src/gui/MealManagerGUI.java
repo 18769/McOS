@@ -97,7 +97,7 @@ public class MealManagerGUI extends JFrame {
         tablePanel.setBorder(BorderFactory.createTitledBorder("數據瀏覽清單"));
         
         // 🎯 嚴格保持 6 個欄位，不要有建立時間
-        tableModel = new DefaultTableModel(new String[]{"ID", "餐點名稱", "準備時間(秒)", "步驟次序", "工序說明", "設備 ID"}, 0) {
+        tableModel = new DefaultTableModel(new String[]{"ID", "餐點名稱", "準備時間(秒)", "工序說明", "設備 ID"}, 0) {
             @Override public boolean isCellEditable(int row, int column) { return false; }
         };
         
@@ -143,7 +143,7 @@ public class MealManagerGUI extends JFrame {
             switchViewBtn.setText("🔄 切換原物料組成分");
             setFieldsEnabled(true);
             
-            String[] columns = {"ID", "餐點名稱", "準備時間(秒)", "步驟次序", "工序說明", "設備 ID"};
+            String[] columns = {"ID", "餐點名稱", "準備時間(秒)",  "工序說明", "設備 ID"};
             tableModel.setDataVector(null, columns);
             loadMeals();
         }
@@ -156,127 +156,138 @@ public class MealManagerGUI extends JFrame {
     }
     
     private void loadIngredientsForSelectedMeal() {
-        tableModel.setRowCount(0); 
-        if (currentSelectedMealId == -1) {
-            statusLabel.setText("⚠️ 提示：未選取特定餐點，顯示全域基礎原物料");
-            tableModel.addRow(new Object[]{"ALL", "全系統", "100%純牛肉餅", "10", "克"});
-            tableModel.addRow(new Object[]{"ALL", "全系統", "非基改馬鈴薯條", "100", "克"});
-            tableModel.addRow(new Object[]{"ALL", "全系統", "芝麻漢堡麵包", "1", "片"});
-            return;
-        }
-        
-        statusLabel.setText("✓ 正在檢視餐點 【" + currentSelectedMealName + "】 的原料組成明細");
-        
-        if (currentSelectedMealName.contains("大麥克") || currentSelectedMealId == 1) {
-            tableModel.addRow(new Object[]{"1", "大麥克", "100%純牛肉餅", "20.0", "克"});
-            tableModel.addRow(new Object[]{"4", "大麥克", "芝麻漢堡麵包", "2.0", "片"});
-            tableModel.addRow(new Object[]{"9", "大麥克", "大麥克特調醬汁", "15.0", "毫升"});
-            tableModel.addRow(new Object[]{"12", "大麥克", "脫水洋蔥/生菜", "10.0", "克"});
-        } else if (currentSelectedMealName.contains("薯條") || currentSelectedMealId == 4) {
-            tableModel.addRow(new Object[]{"2", "黃金薯條", "進口非基改馬鈴薯條", "100.0", "克"});
-            tableModel.addRow(new Object[]{"15", "黃金薯條", "精煉棕櫚油(油炸)", "30.0", "毫升"});
-            tableModel.addRow(new Object[]{"16", "黃金薯條", "食品級細精鹽", "2.0", "克"});
-        } else if (currentSelectedMealName.contains("可樂") || currentSelectedMealId == 8 || currentSelectedMealName.contains("飲") || currentSelectedMealName.contains("杯")) {
-            tableModel.addRow(new Object[]{"8", currentSelectedMealName, "可樂濃縮糖漿", "40.0", "毫升"});
-            tableModel.addRow(new Object[]{"20", currentSelectedMealName, "過濾氣泡碳酸水", "250.0", "毫升"});
-            tableModel.addRow(new Object[]{"21", currentSelectedMealName, "衛生食用冰塊", "50.0", "克"});
-        } else if (currentSelectedMealName.contains("雞") || currentSelectedMealName.contains("塊")) {
-            tableModel.addRow(new Object[]{"5", currentSelectedMealName, "特製裹粉去骨雞肉塊", "4.0", "塊"});
-            tableModel.addRow(new Object[]{"15", currentSelectedMealName, "精煉棕櫚油(油炸)", "40.0", "毫升"});
-            tableModel.addRow(new Object[]{"25", currentSelectedMealName, "糖醋醬包", "1.0", "個"});
-        } else {
-            tableModel.addRow(new Object[]{String.valueOf(currentSelectedMealId), currentSelectedMealName, "核心加工主原料", "1.0", "單位"});
-            tableModel.addRow(new Object[]{"99", currentSelectedMealName, "風味調味包", "1.0", "份"});
-        }
+    tableModel.setRowCount(0); // 先清空表格
+    
+    if (currentSelectedMealId == -1) {
+        statusLabel.setText("⚠️ 提示：請先在餐點列表中選擇一項餐點，再切換檢視原料。");
+        return;
     }
+    
+    statusLabel.setText("⏳ 正在從伺服器動態讀取餐點 【" + currentSelectedMealName + "】 的真實原料組成...");
+    
+    new SwingWorker<java.util.List<Object[]>, Void>() {
+        @Override
+        protected java.util.List<Object[]> doInBackground() throws Exception {
+            java.util.List<Object[]> rowsToReturn = new java.util.ArrayList<>();
+            
+            // 1. 讀取線上真實的原料表與配方表
+            JSONArray bomData = db.DBRequest.loadBOMData();     
+            JSONArray ingredients = db.DBRequest.loadIngredients(); 
+            
+            // 2. 把原料資料做成 Map 方便快速查詢 (key: ing_id -> [名稱, 單位])
+            java.util.Map<Integer, JSONObject> ingMap = new java.util.HashMap<>();
+            for (int i = 0; i < ingredients.length(); i++) {
+                JSONObject ing = ingredients.getJSONObject(i);
+                ingMap.put(ing.optInt("ing_id"), ing);
+            }
+            
+            // 3. 篩選出目前選中餐點 (currentSelectedMealId) 的配方物料
+            for (int i = 0; i < bomData.length(); i++) {
+                JSONObject bom = bomData.getJSONObject(i);
+                int mealId = bom.optInt("mealID");
+                
+                if (mealId == currentSelectedMealId) {
+                    int ingId = bom.optInt("ingID");
+                    double qty = bom.optDouble("qty");
+                    
+                    // 從原料表中查找真正的名字與單位
+                    String ingName = "未知原料";
+                    String unit = "單位";
+                    if (ingMap.containsKey(ingId)) {
+                        JSONObject ingObj = ingMap.get(ingId);
+                        ingName = ingObj.optString("ing_name", "未知原料");
+                        unit = ingObj.optString("unit", "");
+                    }
+                    
+                    
+                    rowsToReturn.add(new Object[]{
+                        ingId, 
+                        currentSelectedMealName, 
+                        ingName, 
+                        qty, 
+                        unit
+                    });
+                }
+            }
+            return rowsToReturn;
+        }
+        
+        @Override
+        protected void done() {
+            try {
+                java.util.List<Object[]> result = get();
+                if (result.isEmpty()) {
+                    statusLabel.setText("⚠️ 提示：資料庫中尚無餐點 【" + currentSelectedMealName + "】 的 BOM 配方成本資料。");
+                } else {
+                    for (Object[] row : result) {
+                        tableModel.addRow(row);
+                    }
+                    statusLabel.setText("✓ 成功載入餐點 【" + currentSelectedMealName + "】 的真實生產 BOM 結構！");
+                }
+            } catch (Exception ex) {
+                statusLabel.setText("❌ 讀取資料庫失敗: " + ex.getMessage());
+                ex.printStackTrace();
+            }
+        }
+    }.execute();
+}
     
     /**
      * 載入餐點列表（🎯 徹底拔除 DBHelper，完全使用 DBRequest 正確版）
      */
     private void loadMeals() {
-        new SwingWorker<JSONArray, Void>() {
-            @Override 
-            protected JSONArray doInBackground() throws Exception { 
-                // 💡 修正：嚴格使用你指定的唯一合法後台連線類別
-                return db.DBRequest.queryMeals(); 
-            }
-            
-            @Override 
-            protected void done() {
-                try {
-                    JSONArray meals = get();
-                    tableModel.setRowCount(0);
-                    
-                    JSONArray recipesArray = new JSONArray();
-                    try {
-                        recipesArray = db.DBRequest.loadRecipes();
-                    } catch (Exception ex) {
-                        // 防呆
-                    }
-
-                    java.util.Map<Integer, Object[]> recipeMap = new java.util.HashMap<>();
-                    recipeMap.put(30, new Object[]{1, "杯槽自動定位並填裝冰塊與原液", "EQ-DRINK-01"});
-                    recipeMap.put(31, new Object[]{1, "機械臂將雞塊藍沉入 180度油鍋", "EQ-FRYER-01"});
-                    recipeMap.put(32, new Object[]{1, "感應薯條起鍋並自動啟動濾油震動", "EQ-FRYER-01"});
-                    recipeMap.put(33, new Object[]{1, "攪拌軸自動下降混和奧利奧碎與冰淇淋", "EQ-DRINK-01"});
-                    recipeMap.put(34, new Object[]{1, "高壓蒸氣自動沖煮研磨咖啡粉", "EQ-COFFEE-01"});
-                    
-                    for (int i = 0; i < meals.length(); i++) {
-                        JSONObject meal = meals.getJSONObject(i);
-                        int mealId = meal.optInt("meal_id");
-                        
-                        Object stepOrder = meal.has("step_order") && !meal.isNull("step_order") ? meal.get("step_order") : "未設定";
-                        Object stepDesc = meal.has("step_description") && !meal.isNull("step_description") ? meal.get("step_description") : "未設定";
-                        Object equipId = meal.has("equipment_id") && !meal.isNull("equipment_id") ? meal.get("equipment_id") : "未設定";
-                        
-                        int stepSeconds = 0;
-                        boolean hasRecipeData = false;
-                        
-                        // ⚡ 遍歷食譜庫：精確找出與目前步驟次序（stepOrder）「完全對齊」的那一筆資料
-                        for (int j = 0; j < recipesArray.length(); j++) {
-                            JSONObject recipeObj = recipesArray.getJSONObject(j);
-                            if (recipeObj.optInt("mealID", -1) == mealId) {
-                                String currentRecipeStep = String.valueOf(recipeObj.optInt("stepOrder"));
-                                
-                                // 當食譜的步驟與當前行資料一致時，抓取對應資訊
-                                if (currentRecipeStep.equals(stepOrder.toString()) || "未設定".equals(stepOrder)) {
-                                    hasRecipeData = true;
-                                    stepOrder = currentRecipeStep;
-                                    stepDesc = recipeObj.optString("stepDescription", stepDesc.toString());
-                                    equipId = recipeObj.optString("etype", equipId.toString());
-                                    
-                                    // 🎯 換算：只拿該步驟自己的 timeMinutes 分鐘數，乘以 60 換算成秒數
-                                    stepSeconds = recipeObj.optInt("timeMinutes", 0) * 60; 
-                                    break; 
-                                }
-                            }
-                        }
-                        
-                        int finalPrepTime = hasRecipeData ? stepSeconds : meal.optInt("prep_time", 0);
-
-                        if (!hasRecipeData && recipeMap.containsKey(mealId) && ("未設定".equals(stepOrder) || "0".equals(stepOrder.toString()))) {
-                            Object[] local = recipeMap.get(mealId);
-                            stepOrder = local[0]; stepDesc = local[1]; equipId = local[2];
-                        }
-                        
-                        // 🎯 嚴格塞入 6 欄結構（不包含建立時間）
-                        tableModel.addRow(new Object[]{
-                            mealId, 
-                            meal.optString("meal_name"), 
-                            finalPrepTime, 
-                            stepOrder, 
-                            stepDesc, 
-                            equipId
-                        });
-                    }
-                    statusLabel.setText("✓ 成功同步遠端餐點並校正單步製程時間，共計 " + meals.length() + " 筆。");
-                } catch (Exception ex) {
-                    statusLabel.setText("✗ 遠端連線異常: " + ex.getMessage());
-                    ex.printStackTrace();
+    new SwingWorker<JSONArray, Void>() {
+        @Override 
+        protected JSONArray doInBackground() throws Exception { 
+            // 🚀 這裡會去呼叫 DBRequest，它會去拆解 PHP 的 {"data": [...]} 並回傳 JSONArray
+            return db.DBRequest.queryMeals(); 
+        }
+        
+        @Override 
+        protected void done() {
+            try {
+                JSONArray meals = get();
+                
+                // 🛑 安全檢查：如果沒抓到資料，不要往下跑避免報錯
+                if (meals == null) {
+                    statusLabel.setText("⚠️ 提示: 後端未回傳任何餐點資料");
+                    return;
                 }
+                
+                tableModel.setRowCount(0); // 清空表格
+                
+                for (int i = 0; i < meals.length(); i++) {
+                    JSONObject meal = meals.getJSONObject(i);
+                    
+                    int mealId = meal.optInt("meal_id");
+                    String mealName = meal.optString("meal_name", "未知");
+                    
+                    // 🎯 對齊新 PHP 的欄位名稱 total_minutes
+                    int totalMinutes = meal.optInt("total_minutes", 0); 
+                    int prepTimeSeconds = totalMinutes * 60; 
+                    
+                    // 🎯 對齊新 PHP 的欄位名稱 step_description 與 etype
+                    String stepDesc = meal.optString("step_description", "未設定");
+                    String equipId = meal.optString("etype", "未設定");
+                    
+                    // 塞入新的 5 欄表格
+                    tableModel.addRow(new Object[]{
+                        mealId, 
+                        mealName, 
+                        prepTimeSeconds, 
+                        stepDesc, 
+                        equipId
+                    });
+                }
+                statusLabel.setText("✓ 已成功整合餐點總工序時間 (秒)");
+            } catch (Exception ex) {
+                // 💡 如果還是空白，看這裡印出什麼錯誤訊息，就能秒懂卡在哪裡！
+                statusLabel.setText("✗ 錯誤: " + ex.getMessage());
+                ex.printStackTrace(); // 在控制台印出詳細報錯
             }
-        }.execute();
-    }
+        }
+    }.execute();
+}
     
     // 🎯 點擊列回填事件：索引 0~5 完美對應表格 6 欄
     private void updateInputFields() {
@@ -288,9 +299,9 @@ public class MealManagerGUI extends JFrame {
         
         mealNameField.setText(currentSelectedMealName);
         prepTimeSpinner.setValue(Integer.parseInt(tableModel.getValueAt(row, 2).toString()));
-        stepOrderField.setText(tableModel.getValueAt(row, 3).toString());
-        stepDescField.setText(tableModel.getValueAt(row, 4).toString());
-        equipmentIdField.setText(tableModel.getValueAt(row, 5).toString());
+        //stepOrderField.setText(tableModel.getValueAt(row, 3).toString());
+        stepDescField.setText(tableModel.getValueAt(row, 3).toString());
+        equipmentIdField.setText(tableModel.getValueAt(row, 4).toString());
     }
     
     private void openBomDialog() {
@@ -300,40 +311,71 @@ public class MealManagerGUI extends JFrame {
         JTabbedPane tabs = new JTabbedPane();
         
         // Tab 1
+        // Tab 1: 訂單原料消耗 (連接 View_Daily_Total_Consumption)
         JPanel p1 = new JPanel(new BorderLayout());
         JPanel p1Top = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        p1Top.add(new JLabel("輸入生產分析日期 (YYYY-MM-DD)："));
-        JTextField dateF = new JTextField("2026-05-18", 10);
-        JButton btn1 = new JButton("計算原料消耗總計");
-        p1Top.add(dateF); p1Top.add(btn1);
-        DefaultTableModel m1 = new DefaultTableModel(new String[]{"原料名稱", "預估今日消耗總量", "單位", "庫存水位建議"}, 0);
-        p1.add(p1Top, BorderLayout.NORTH); p1.add(new JScrollPane(new JTable(m1)), BorderLayout.CENTER);
+        p1Top.add(new JLabel("選擇生產分析日期："));
+
+        // 宣告 dateBox 為 final，確保監聽器可以存取
+        final JComboBox<String> dateBox = new JComboBox<>(new String[]{"2026-04-21", "2026-04-22"});
+        dateBox.setEditable(true); 
+        dateBox.setPreferredSize(new Dimension(120, 25));
+        p1Top.add(dateBox);
+
+        JButton btn1 = new JButton("計算實際消耗量");
+        p1Top.add(btn1);
+
+        DefaultTableModel m1 = new DefaultTableModel(new String[]{"原料名稱", "實際消耗量", "單位", "庫存水位建議"}, 0);
+        JTable table1 = new JTable(m1);
+        p1.add(p1Top, BorderLayout.NORTH); 
+        p1.add(new JScrollPane(table1), BorderLayout.CENTER);
+
         btn1.addActionListener(e -> {
+            // 修正：這裡改成從 dateBox 取得值
+            String selectedDate = (String) dateBox.getEditor().getItem();
+            
             m1.setRowCount(0);
-            m1.addRow(new Object[]{"100%純牛肉餅", "420.0", "克", "🟢 安全"});
-            m1.addRow(new Object[]{"進口非基改馬鈴薯條", "1500.0", "克", "🟢 安全"});
-            m1.addRow(new Object[]{"芝麻漢堡麵包", "84.0", "片", "🚨 偏低，建議補貨"});
+            
+            new SwingWorker<JSONArray, Void>() {
+                @Override
+                protected JSONArray doInBackground() throws Exception {
+                    // 呼叫 DBRequest 進行查詢
+                    return db.DBRequest.getConsumptionWithInventory(selectedDate);
+                }
+                @Override
+                protected void done() {
+                    try {
+                        JSONArray data = get();
+                        if (data.length() == 0) {
+                            // 若無資料回饋使用者
+                            statusLabel.setText("⚠️ " + selectedDate + " 無相關消耗記錄");
+                        } else {
+                            for (int i = 0; i < data.length(); i++) {
+                                JSONObject row = data.getJSONObject(i);
+                                String status = row.optString("庫存狀態", "未知");
+                                
+                                String displayStatus = status.contains("過低") ? "🚨 " + status : 
+                                                    (status.contains("偏低") ? "⚠️ " + status : "🟢 " + status);
+                                                    
+                                m1.addRow(new Object[]{
+                                    row.getString("原料名稱"), 
+                                    row.getDouble("單日總消耗數量"), 
+                                    row.getString("單位"), 
+                                    displayStatus
+                                });
+                            }
+                            statusLabel.setText("✓ 數據更新完成");
+                        }
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(null, "讀取失敗: " + ex.getMessage());
+                    }
+                }
+            }.execute();
         });
+
+        // 最後記得把 p1 加入到 tabs 中
+        tabs.addTab("原料消耗統計", p1);
         
-        // Tab 2
-         /* 
-
-        JPanel p2 = new JPanel(new BorderLayout());
-        JTextArea txt2 = new JTextArea("\n 🌲 點擊下方按鈕以遞迴展開單品生產結構 (BOM Tree) ...\n");
-        txt2.setFont(new Font("Monospaced", Font.PLAIN, 14)); txt2.setEditable(false);
-        JButton btn2 = new JButton("🌲 展開全單品樹狀 BOM");
-        p2.add(new JScrollPane(txt2), BorderLayout.CENTER); p2.add(btn2, BorderLayout.SOUTH);
-        btn2.addActionListener(e -> txt2.setText(
-            "🌲 McOS 標準單品材料清單結構樹\n" +
-            "├── 🍔 大麥克 (Meal_ID: 1)\n" +
-            "│   ├── [原料 1] 牛肉餅 * 2 (20g)\n" +
-            "│   ├── [原料 4] 漢堡麵包 * 2 (2片)\n" +
-            "│   └── [原料 9] 專用大麥克醬 * 1 (15ml)\n" +
-            "└── 🍟 黃金薯條 (Meal_ID: 4)\n" +
-            "    └── [原料 2] 馬鈴薯條 * 1 (100g)\n"
-        )); 
-        */
-
         // Tab 2: 單品 BOM 樹狀圖 (完整動態版)
         JPanel p2 = new JPanel(new BorderLayout());
         JTextArea txt2 = new JTextArea("\n 🌲 點擊下方按鈕以展開 BOM 樹狀結構...\n");
@@ -393,38 +435,164 @@ public class MealManagerGUI extends JFrame {
         });
         
         // Tab 3
+        // Tab 3: 套餐內含餐點 (改成樹狀圖版本)
         JPanel p3 = new JPanel(new BorderLayout());
-        DefaultTableModel m3 = new DefaultTableModel(new String[]{"套餐名稱", "內含餐點組合 ID 清單", "銷售狀態"}, 0);
-        p3.add(new JScrollPane(new JTable(m3)), BorderLayout.CENTER);
+
+        // 1. 建立用來顯示樹狀圖的文字區域
+        JTextArea txt3 = new JTextArea("\n 🍔 點擊下方按鈕同步線上現存套餐組合與餐點明細...\n");
+        txt3.setFont(new Font("Monospaced", Font.PLAIN, 14)); 
+        txt3.setEditable(false);
+
+        // 2. 這是原本就有的按鈕
         JButton btn3 = new JButton("同步線上現存套餐組合");
+
+        // 3. 把元件重新塞進面板
+        p3.add(new JScrollPane(txt3), BorderLayout.CENTER); 
         p3.add(btn3, BorderLayout.SOUTH);
+
         btn3.addActionListener(e -> {
-            m3.setRowCount(0);
-            try {
-                java.util.LinkedHashMap<String, String> combos = DBRequest.loadCombos();
-                for (String name : combos.keySet()) m3.addRow(new Object[]{name, combos.get(name), "正常販售"});
-            } catch(Exception ex) {
-                m3.addRow(new Object[]{"大麥克雙人分享特餐", "1,1,4,8,8", "正常販售"});
-                m3.addRow(new Object[]{"麥脆雞饕客爽吃餐", "5,6,7,8", "正常販售"});
-            }
-        });
+        txt3.setText(" ⏳ 正在同步伺服器套餐資料並轉換名稱中...\n");
         
-        // Tab 4
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                // 1. 直接重複利用剛剛做好的爆炸圖 API，裡面就包含套餐與餐點名字了！
+                JSONObject response = db.DBRequest.getComboBomExplosion();
+                if (!"success".equals(response.optString("status"))) {
+                    return "❌ 同步失敗: " + response.optString("message");
+                }
+                
+                JSONArray details = response.getJSONArray("details");
+                
+                // 2. 建立結構樹 (用 TreeMap 排序)
+                java.util.TreeMap<Integer, StringBuilder> comboTree = new java.util.TreeMap<>();
+                java.util.Map<Integer, String> nameMap = new java.util.HashMap<>();
+                
+                for (int i = 0; i < details.length(); i++) {
+                    JSONObject row = details.getJSONObject(i);
+                    int cId = row.getInt("comboID");
+                    String cName = row.getString("comboName");
+                    String mName = row.getString("meal_name");
+                    int mId = row.optInt("mealID"); // 如果 PHP 沒傳也可以從之前的欄位對齊
+                    int qty = row.getInt("quantity");
+                    
+                    nameMap.put(cId, cName);
+                    
+                    // 🎯 核心要求：餐點直接顯示【名字 + ID】，格式如：大麥克 (ID: 1) * 1
+                    comboTree.computeIfAbsent(cId, k -> new StringBuilder())
+                    .append("  ├── 🍕 ")
+                    .append(mName)
+                    .append(" (ID: ").append(mId).append(")") // 🎯 直接塞入抓到的 mId
+                    .append(" * ").append(qty).append("\n");
+                    }
+                
+                // 3. 開始組合最終呈現在 Tab 3 的漂亮樹狀字串
+                StringBuilder sb = new StringBuilder();
+                sb.append("📋 [線上現存套餐組合明細清單] ➔ 餐點名稱與 ID 對照樹\n");
+                sb.append("===========================================================\n");
+                
+                for (int cId : comboTree.keySet()) {
+                    sb.append("🍱 套餐名稱：").append(nameMap.get(cId))
+                    .append(" (套餐 ID: ").append(cId).append(") ➔ [正常販售]\n");
+                    
+                    // 填入內含的單品名字+ID組合
+                    sb.append(comboTree.get(cId));
+                    sb.append("-----------------------------------------------------------\n");
+                }
+                
+                sb.append("✓ [全系統現存套餐內含餐點名稱同步完畢]");
+                return sb.toString();
+            }
+            
+            @Override
+            protected void done() {
+                try { 
+                    txt3.setText(get()); 
+                } catch(Exception ex) { 
+                    txt3.setText("❌ 同步解析錯誤: " + ex.getMessage()); 
+                    ex.printStackTrace();
+                }
+            }
+        }.execute();
+    });
+        
+       
+        // Tab 4: 套餐物料爆炸圖 (完整動態連動資料庫版)
         JPanel p4 = new JPanel(new BorderLayout());
         JTextArea txt4 = new JTextArea("\n 🌴 點擊下方按鈕進行二級 BOM 聯動爆炸解析 (Combo Explosion) ...\n");
-        txt4.setFont(new Font("Monospaced", Font.PLAIN, 14)); txt4.setEditable(false);
+        txt4.setFont(new Font("Monospaced", Font.PLAIN, 14)); 
+        txt4.setEditable(false);
         JButton btn4 = new JButton("🌴 產生套餐最底層原料關聯爆炸圖");
-        p4.add(new JScrollPane(txt4), BorderLayout.CENTER); p4.add(btn4, BorderLayout.SOUTH);
-        btn4.addActionListener(e -> txt4.setText(
-            "🌴 [二級跨表聯動] 套餐 ➜ 內含單品 ➜ 最底層物料關聯圖\n" +
-            "===========================================================\n" +
-            "🍱 套餐：大麥克雙人分享特餐 (Combo_ID: 1)\n" +
-            "  ├── 🍔 大麥克 * 2  ➔ 總累計需求：牛肉餅*4, 漢堡麵包*4, 大麥克醬*30ml\n" +
-            "  ├── 🍟 黃金薯條 * 1 ➔ 總累計需求：馬鈴薯條*100g\n" +
-            "  └── 🥤 冰可樂 * 2   ➔ 總累計需求：過濾氣泡碳酸水*500ml\n" +
-            "-----------------------------------------------------------\n" +
-            "📊 [本套餐全原料物料清單清查完畢]"
-        ));
+        p4.add(new JScrollPane(txt4), BorderLayout.CENTER); 
+        p4.add(btn4, BorderLayout.SOUTH);
+
+        btn4.addActionListener(e -> {
+            txt4.setText(" ⏳ 正在清查跨表數據並計算物料清單，請稍候...\n");
+            
+            new SwingWorker<String, Void>() {
+                @Override
+                protected String doInBackground() throws Exception {
+                    // 1. 遠端抓取包裹了 details 與 boms 的 JSONObject
+                    JSONObject response = db.DBRequest.getComboBomExplosion();
+                    if (!"success".equals(response.optString("status"))) {
+                        return "❌ 讀取失敗: " + response.optString("message");
+                    }
+                    
+                    JSONArray details = response.getJSONArray("details");
+                    JSONArray boms = response.getJSONArray("boms");
+                    
+                    // 2. 建立一個 Map 方便用 comboID 快速查詢總原料
+                    java.util.Map<Integer, String> bomMap = new java.util.HashMap<>();
+                    for (int i = 0; i < boms.length(); i++) {
+                        JSONObject b = boms.getJSONObject(i);
+                        bomMap.put(b.getInt("comboID"), b.getString("total_ingredients"));
+                    }
+                    
+                    // 3. 處理結構樹邏輯 (用 TreeMap 確保套餐編號依 1, 2, 3... 排序)
+                    java.util.TreeMap<Integer, StringBuilder> comboTree = new java.util.TreeMap<>();
+                    java.util.Map<Integer, String> nameMap = new java.util.HashMap<>();
+                    
+                    for (int i = 0; i < details.length(); i++) {
+                        JSONObject row = details.getJSONObject(i);
+                        int cId = row.getInt("comboID");
+                        String cName = row.getString("comboName");
+                        String mName = row.getString("meal_name");
+                        int qty = row.getInt("quantity");
+                        
+                        nameMap.put(cId, cName);
+                        
+                        // 如果是此套餐第一次出現，先建立套餐標頭
+                        comboTree.computeIfAbsent(cId, k -> new StringBuilder())
+                                .append("  ├── 🍔 ").append(mName).append(" * ").append(qty).append("\n");
+                    }
+                    
+                    // 4. 開始組合最終呈現在文字框的漂亮樹狀字串
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("🌴 [二級跨表聯動] 套餐 ➔ 內含單品 ➔ 最底層物料關聯圖\n");
+                    sb.append("===========================================================\n");
+                    
+                    for (int cId : comboTree.keySet()) {
+                        sb.append("🍱 套餐：").append(nameMap.get(cId)).append(" (Combo_ID: ").append(cId).append(")\n");
+                        // 填入內含的單品組合
+                        sb.append(comboTree.get(cId));
+                        sb.append("  ➔ 總累計需求：").append(bomMap.getOrDefault(cId, "無物料配方資料")).append("\n");
+                        sb.append("-----------------------------------------------------------\n");
+                    }
+                    
+                    sb.append("📊 [本系統全套餐原始物料爆炸清單清查完畢]");
+                    return sb.toString();
+                }
+                
+                @Override
+                protected void done() {
+                    try { 
+                        txt4.setText(get()); 
+                    } catch(Exception ex) { 
+                        txt4.setText("❌ 爆炸圖解析錯誤: " + ex.getMessage()); 
+                    }
+                }
+            }.execute();
+        });
         
         tabs.addTab("1. 訂單原料消耗", p1); tabs.addTab("2. 單品 BOM 樹狀圖", p2);
         tabs.addTab("3. 套餐內含餐點", p3); tabs.addTab("4. 套餐物料爆炸圖", p4);
