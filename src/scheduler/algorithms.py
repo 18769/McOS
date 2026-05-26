@@ -1,28 +1,5 @@
 import time
 
-try:
-    from .algo_scheduler import McOSScheduler
-except Exception:
-    McOSScheduler = None
-
-_scheduler_instance = None
-
-
-def get_scheduler():
-    global _scheduler_instance
-    if McOSScheduler is None:
-        return None
-    if _scheduler_instance is None:
-        _scheduler_instance = McOSScheduler()
-    return _scheduler_instance
-
-
-def mcosscheduler_logic(orders, **kwargs):
-    scheduler = get_scheduler()
-    if scheduler is None:
-        raise RuntimeError("McOSScheduler is not available. Check src/scheduler/algo_scheduler.py import.")
-    return scheduler.optimize_schedule(orders)
-
 
 def fcfs_logic(tasks, **kwargs):
     return sorted(tasks, key=lambda x: x['id'])

@@ -78,7 +78,7 @@ public class MealManagerGUI extends JFrame {
         refreshBtn = new JButton("刷新"); refreshBtn.addActionListener(e -> refreshData()); inputPanel.add(refreshBtn);
         
         // 功能按鈕
-        switchViewBtn = new JButton("🔄 切換原物料組成分");
+        switchViewBtn = new JButton("🔄 切換總原料清單");
         switchViewBtn.setFont(new Font("Microsoft YaHei", Font.BOLD, 12));
         switchViewBtn.setBackground(new Color(220, 240, 255));
         switchViewBtn.addActionListener(e -> toggleViewMode());
@@ -130,24 +130,26 @@ public class MealManagerGUI extends JFrame {
     }
     
     private void toggleViewMode() {
-        isShowingIngredients = !isShowingIngredients;
-        if (isShowingIngredients) {
-            switchViewBtn.setText("🍔 切換回餐點列表");
-            setFieldsEnabled(false); 
-            
-            String[] columns = {"原料ID", "對應餐點", "使用原料名稱", "標準配方用量", "計量單位"};
-            tableModel.setDataVector(null, columns);
-            
-            loadIngredientsForSelectedMeal();
-        } else {
-            switchViewBtn.setText("🔄 切換原物料組成分");
-            setFieldsEnabled(true);
-            
-            String[] columns = {"ID", "餐點名稱", "準備時間(秒)",  "工序說明", "設備 ID"};
-            tableModel.setDataVector(null, columns);
-            loadMeals();
-        }
+    isShowingIngredients = !isShowingIngredients;
+    if (isShowingIngredients) {
+        switchViewBtn.setText("🍔 切換回餐點列表");
+        setFieldsEnabled(false); 
+        
+        // 🎯 核心改動：改成純粹的 4 個原料欄位，最後一欄改為「現有存量」
+        String[] columns = {"原料 ID", "原料名稱", "計量單位", "現有存量"};
+        tableModel.setDataVector(null, columns);
+        
+        loadIngredientsForSelectedMeal();
+    } else {
+        switchViewBtn.setText("🔄 切換總原料清單");
+        setFieldsEnabled(true);
+        
+        // 回到餐點列表的 5 欄結構
+        String[] columns = {"ID", "餐點名稱", "準備時間(秒)", "工序說明", "設備 ID"};
+        tableModel.setDataVector(null, columns);
+        loadMeals();
     }
+}
     
     private void setFieldsEnabled(boolean enabled) {
         mealNameField.setEnabled(enabled); prepTimeSpinner.setEnabled(enabled);
@@ -157,57 +159,33 @@ public class MealManagerGUI extends JFrame {
     
     private void loadIngredientsForSelectedMeal() {
     tableModel.setRowCount(0); // 先清空表格
-    
-    if (currentSelectedMealId == -1) {
-        statusLabel.setText("⚠️ 提示：請先在餐點列表中選擇一項餐點，再切換檢視原料。");
-        return;
-    }
-    
-    statusLabel.setText("⏳ 正在從伺服器動態讀取餐點 【" + currentSelectedMealName + "】 的真實原料組成...");
+    statusLabel.setText("⏳ 正在從伺服器動態讀取資料庫現存所有原物料清冊...");
     
     new SwingWorker<java.util.List<Object[]>, Void>() {
         @Override
         protected java.util.List<Object[]> doInBackground() throws Exception {
             java.util.List<Object[]> rowsToReturn = new java.util.ArrayList<>();
             
-            // 1. 讀取線上真實的原料表與配方表
-            JSONArray bomData = db.DBRequest.loadBOMData();     
+            // 🚀 直接從 DBRequest 撈取所有原料的真實線上資料
             JSONArray ingredients = db.DBRequest.loadIngredients(); 
             
-            // 2. 把原料資料做成 Map 方便快速查詢 (key: ing_id -> [名稱, 單位])
-            java.util.Map<Integer, JSONObject> ingMap = new java.util.HashMap<>();
             for (int i = 0; i < ingredients.length(); i++) {
                 JSONObject ing = ingredients.getJSONObject(i);
-                ingMap.put(ing.optInt("ing_id"), ing);
-            }
-            
-            // 3. 篩選出目前選中餐點 (currentSelectedMealId) 的配方物料
-            for (int i = 0; i < bomData.length(); i++) {
-                JSONObject bom = bomData.getJSONObject(i);
-                int mealId = bom.optInt("mealID");
                 
-                if (mealId == currentSelectedMealId) {
-                    int ingId = bom.optInt("ingID");
-                    double qty = bom.optDouble("qty");
-                    
-                    // 從原料表中查找真正的名字與單位
-                    String ingName = "未知原料";
-                    String unit = "單位";
-                    if (ingMap.containsKey(ingId)) {
-                        JSONObject ingObj = ingMap.get(ingId);
-                        ingName = ingObj.optString("ing_name", "未知原料");
-                        unit = ingObj.optString("unit", "");
-                    }
-                    
-                    
-                    rowsToReturn.add(new Object[]{
-                        ingId, 
-                        currentSelectedMealName, 
-                        ingName, 
-                        qty, 
-                        unit
-                    });
-                }
+                int ingId = ing.optInt("ing_id");
+                String ingName = ing.optString("ing_name", "未知原料");
+                String unit = ing.optString("unit", "");
+                
+                // 🎯 核心修正：對齊你資料庫內真實的現有庫存量欄位 stock_qty
+                double stockQty = ing.optDouble("stock_qty", 0.0);
+                
+                // 🎯 嚴格按照 4 大原料新欄位順序塞入
+                rowsToReturn.add(new Object[]{
+                    ingId, 
+                    ingName, 
+                    unit, 
+                    stockQty
+                });
             }
             return rowsToReturn;
         }
@@ -217,12 +195,12 @@ public class MealManagerGUI extends JFrame {
             try {
                 java.util.List<Object[]> result = get();
                 if (result.isEmpty()) {
-                    statusLabel.setText("⚠️ 提示：資料庫中尚無餐點 【" + currentSelectedMealName + "】 的 BOM 配方成本資料。");
+                    statusLabel.setText("⚠️ 提示：資料庫中目前沒有任何原料數據。");
                 } else {
                     for (Object[] row : result) {
                         tableModel.addRow(row);
                     }
-                    statusLabel.setText("✓ 成功載入餐點 【" + currentSelectedMealName + "】 的真實生產 BOM 結構！");
+                    statusLabel.setText("✓ 成功載入！目前資料庫共計有 " + result.size() + " 項全量原物料。");
                 }
             } catch (Exception ex) {
                 statusLabel.setText("❌ 讀取資料庫失敗: " + ex.getMessage());
@@ -310,71 +288,162 @@ public class MealManagerGUI extends JFrame {
         bomDialog.setLocationRelativeTo(this);
         JTabbedPane tabs = new JTabbedPane();
         
+
+        
         // Tab 1
-        // Tab 1: 訂單原料消耗 (連接 View_Daily_Total_Consumption)
+        // ==================== Tab 1: 原料消耗統計 (上下雙表格版) ====================
         JPanel p1 = new JPanel(new BorderLayout());
+        
+        // 【頂部控制區：改用你要求的分開下拉選單】
         JPanel p1Top = new JPanel(new FlowLayout(FlowLayout.LEFT));
         p1Top.add(new JLabel("選擇生產分析日期："));
 
-        // 宣告 dateBox 為 final，確保監聽器可以存取
-        final JComboBox<String> dateBox = new JComboBox<>(new String[]{"2026-04-21", "2026-04-22"});
-        dateBox.setEditable(true); 
-        dateBox.setPreferredSize(new Dimension(120, 25));
-        p1Top.add(dateBox);
+        String[] years = {"2024", "2025", "2026", "2027"};
+        final JComboBox<String> yearBox = new JComboBox<>(years);
+        yearBox.setSelectedItem("2026");
+        p1Top.add(yearBox);
+        p1Top.add(new JLabel("年 "));
+
+        String[] months = {"01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"};
+        final JComboBox<String> monthBox = new JComboBox<>(months);
+        monthBox.setSelectedItem("04"); // 預設 4 月
+        p1Top.add(monthBox);
+        p1Top.add(new JLabel("月 "));
+
+        String[] days = new String[31];
+        for (int i = 1; i <= 31; i++) { days[i - 1] = String.format("%02d", i); }
+        final JComboBox<String> dayBox = new JComboBox<>(days);
+        dayBox.setSelectedItem("21"); // 預設 21 日
+        p1Top.add(dayBox);
+        p1Top.add(new JLabel("日 "));
 
         JButton btn1 = new JButton("計算實際消耗量");
         p1Top.add(btn1);
+        p1.add(p1Top, BorderLayout.NORTH); 
 
+        // 【中央主內容區：用 GridLayout 切成上下兩層】
+        JPanel centerPanel = new JPanel(new GridLayout(2, 1, 0, 10)); // 2行1列，上下排開
+        
+        // ------------------ 🍔 上半部：當日點餐/套餐明細 ------------------
+        JPanel upperPanel = new JPanel(new BorderLayout());
+        upperPanel.setBorder(BorderFactory.createTitledBorder(" 上半部：當日銷售餐點 / 套餐明細 "));
+        // 建立上半部表格模型與表格
+        DefaultTableModel mUpper = new DefaultTableModel(new String[]{"訂單編號", "顧客名稱", "點餐時間", "訂購內容"}, 0);
+        JTable tableUpper = new JTable(mUpper);
+        tableUpper.setRowHeight(22);
+        upperPanel.add(new JScrollPane(tableUpper), BorderLayout.CENTER);
+        
+        // ------------------ 🚨 下半部：當日原物料消耗與預警 ------------------
+        JPanel lowerPanel = new JPanel(new BorderLayout());
+        lowerPanel.setBorder(BorderFactory.createTitledBorder(" 下半部：原物料消耗與庫存預警建議 "));
+        // 建立下半部表格模型（就是你原本的 m1 欄位）
         DefaultTableModel m1 = new DefaultTableModel(new String[]{"原料名稱", "實際消耗量", "單位", "庫存水位建議"}, 0);
         JTable table1 = new JTable(m1);
-        p1.add(p1Top, BorderLayout.NORTH); 
-        p1.add(new JScrollPane(table1), BorderLayout.CENTER);
+        table1.setRowHeight(25);
+        lowerPanel.add(new JScrollPane(table1), BorderLayout.CENTER);
+        
+        // 將上下兩部分塞進中央區
+        centerPanel.add(upperPanel);
+        centerPanel.add(lowerPanel);
+        p1.add(centerPanel, BorderLayout.CENTER);
 
+
+    
+        // 【按鈕點擊事件：一鍵將 JSON 解析並同步倒入上半部餐點與下半部原料表格】
         btn1.addActionListener(e -> {
-            // 修正：這裡改成從 dateBox 取得值
-            String selectedDate = (String) dateBox.getEditor().getItem();
+            String selYear = (String) yearBox.getSelectedItem();
+            String selMonth = (String) monthBox.getSelectedItem();
+            String selDay = (String) dayBox.getSelectedItem();
+            String selectedDate = selYear + "-" + selMonth + "-" + selDay;
             
+            // 同步清空上半部餐點與下半部原料
+            mUpper.setRowCount(0);
             m1.setRowCount(0);
+            statusLabel.setText("⏳ 正在計算 " + selectedDate + " 當日餐點與原物料連動數據...");
             
-            new SwingWorker<JSONArray, Void>() {
+            new SwingWorker<org.json.JSONArray, Void>() {
                 @Override
-                protected JSONArray doInBackground() throws Exception {
-                    // 呼叫 DBRequest 進行查詢
-                    return db.DBRequest.getConsumptionWithInventory(selectedDate);
+                protected org.json.JSONArray doInBackground() throws Exception {
+                    // 🚀 繞過舊方法的束縛，直接精準抓取我們更新後的 PHP
+                    String urlStr = "http://120.107.152.110/~a0303/DB/get_consumption_report.php?date=" + selectedDate;
+                    java.net.URL url = new java.net.URL(urlStr);
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(5000);
+                    conn.setReadTimeout(5000);
+                    
+                    if (conn.getResponseCode() == 200) {
+                        java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(conn.getInputStream(), "UTF-8")
+                        );
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            sb.append(line);
+                        }
+                        reader.close();
+                        return new org.json.JSONArray(sb.toString());
+                    }
+                    return new org.json.JSONArray(); // 失敗回傳空陣列
                 }
+                
                 @Override
                 protected void done() {
                     try {
-                        JSONArray data = get();
-                        if (data.length() == 0) {
-                            // 若無資料回饋使用者
-                            statusLabel.setText("⚠️ " + selectedDate + " 無相關消耗記錄");
-                        } else {
-                            for (int i = 0; i < data.length(); i++) {
-                                JSONObject row = data.getJSONObject(i);
-                                String status = row.optString("庫存狀態", "未知");
-                                
-                                String displayStatus = status.contains("過低") ? "🚨 " + status : 
-                                                    (status.contains("偏低") ? "⚠️ " + status : "🟢 " + status);
-                                                    
+                        org.json.JSONArray jsonArray = get();
+                        
+                        if (jsonArray == null || jsonArray.length() == 0) {
+                            statusLabel.setText("⚠️ " + selectedDate + " 當日無任何餐點銷售或物料消耗紀錄。");
+                            return;
+                        }
+                        
+                        int mealCount = 0;
+                        int consCount = 0;
+                        
+                        // 逐筆讀取大包裹 JSON，依照 dataType 分流
+                        for (int i = 0; i < jsonArray.length(); i++) {
+                            org.json.JSONObject row = jsonArray.getJSONObject(i);
+                            String dataType = row.optString("dataType", "");
+                            
+                            // 🍔 1. 分流到【上半部表格】：顯示當日有哪些餐點或套餐
+                            if ("meal".equals(dataType)) {
+                                mUpper.addRow(new Object[]{
+                                    row.optInt("訂單編號"),
+                                    row.optString("顧客名稱"),
+                                    row.optString("點餐時間"),
+                                    row.optString("訂購內容") // 顯示餐點套餐名稱
+                                });
+                                mealCount++;
+                            }
+                            
+                            // 🚨 2. 分流到【下半部表格】：顯示當日消耗哪些原物料
+                            if ("consumption".equals(dataType)) {
+                                String status = row.optString("庫存狀態", "庫存充足");
+                                String displayStatus = status.contains("過低") || status.contains("極低") ? "🚨 " + status : 
+                                                      (status.contains("偏低") ? "⚠️ " + status : "🟢 " + status);
+                                                        
                                 m1.addRow(new Object[]{
-                                    row.getString("原料名稱"), 
-                                    row.getDouble("單日總消耗數量"), 
-                                    row.getString("單位"), 
+                                    row.optString("原料名稱"), 
+                                    row.optDouble("單日總消耗數量"), 
+                                    row.optString("單位"), 
                                     displayStatus
                                 });
+                                consCount++;
                             }
-                            statusLabel.setText("✓ 數據更新完成");
                         }
+                        
+                        statusLabel.setText(String.format("✓ %s 載入完成！上半部餐點: %d 筆，下半部原料: %d 筆", 
+                                            selectedDate, mealCount, consCount));
+                        
                     } catch (Exception ex) {
-                        JOptionPane.showMessageDialog(null, "讀取失敗: " + ex.getMessage());
+                        statusLabel.setText("❌ 數據跨表解析錯誤");
+                        ex.printStackTrace();
                     }
                 }
             }.execute();
         });
 
-        // 最後記得把 p1 加入到 tabs 中
-        tabs.addTab("原料消耗統計", p1);
+        tabs.addTab("1. 訂單原料消耗", p1);
         
         // Tab 2: 單品 BOM 樹狀圖 (完整動態版)
         JPanel p2 = new JPanel(new BorderLayout());

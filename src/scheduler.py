@@ -17,7 +17,7 @@ if os.path.isdir(package_dir):
 
 # Import and re-export the core scheduler implementation
 try:
-    core = import_module('scheduler.core')
+    core = import_module('core')
     McOSScheduler = core.McOSScheduler
 except Exception:
     # fallback: if package isn't available, try to import local implementation

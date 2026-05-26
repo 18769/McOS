@@ -23,8 +23,8 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 def start_python_scheduler():
-    import scheduler
-    scheduler.start_engine()
+    from scheduler.engine import start_engine
+    start_engine()
 
 if __name__ == '__main__':
     os.system('chcp 65001 > nul')
