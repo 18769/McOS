@@ -481,7 +481,7 @@ private static int normalizePrepTimeSeconds(int prepTime) {
         for (int i = 0; i < workersJson.length(); i++) {
             JSONObject worker = workersJson.getJSONObject(i);
             workers.add(worker);
-            int workerId = worker.optInt("worker_id", 0);
+            int workerId = worker.optInt("workerID", 0);
             if (workerId <= 0) continue;
             String name = worker.optString("name", "Worker " + workerId);
             workerNames.put(workerId, name);
