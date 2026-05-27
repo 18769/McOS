@@ -21,7 +21,7 @@ class McOSScheduler:
             with urllib.request.urlopen(req, timeout=5) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode('utf-8'))
-                    worker_ids = [int(w.get("worker_id")) for w in data.get("data", []) if "worker_id" in w]
+                    worker_ids = [int(w.get("workerID")) for w in data.get("data", []) if "workerID" in w]
                     worker_ids = [wid for wid in worker_ids if wid > 0]
                     if worker_ids:
                         return sorted(worker_ids)

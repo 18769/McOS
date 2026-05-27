@@ -486,6 +486,7 @@ private static int normalizePrepTimeSeconds(int prepTime) {
             String name = worker.optString("name", "Worker " + workerId);
             workerNames.put(workerId, name);
             workerIds.add(workerId);
+            System.out.println("員工: "+name);
         }
 
         if (workerIds.isEmpty()) {
