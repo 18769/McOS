@@ -1076,19 +1076,41 @@ public class KitchenGUI {
             payload.put("customer_name", orderInfo.optString("customer_name", ""));
         }
         JSONArray items = orderInfo.optJSONArray("items");
+        JSONArray safeItems = new JSONArray();
         if (items != null) {
-            payload.put("items", items);
+            for (int i = 0; i < items.length(); i++) {
+                String mealName = items.optString(i, "");
+                if (mealName.isEmpty()) {
+                    continue;
+                }
+                if (!mealPrepTimes.containsKey(mealName)) {
+                    System.err.println("找不到餐點，略過存檔與扣帳: " + mealName);
+                    continue;
+                }
+                safeItems.put(mealName);
+            }
         }
+        payload.put("items", safeItems);
 
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
+                JSONArray itemNames = payload.optJSONArray("items");
+                if (itemNames == null) {
+                    itemNames = new JSONArray();
+                }
                 try {
-                    JSONArray itemNames = items != null ? items : new JSONArray();
-                    DBRequest.consumeInventory(itemNames, String.valueOf(orderId), payload.optString("completed_at", ""));
+                    if (itemNames.length() > 0) {
+                        DBRequest.consumeInventory(itemNames, String.valueOf(orderId), payload.optString("completed_at", ""));
+                    }
+                } catch (Exception e) {
+                    System.err.println("庫存扣帳失敗: " + e.getMessage());
+                }
+
+                try {
                     DBRequest.recordOrderHistory(payload);
                 } catch (Exception e) {
-                    System.err.println("完成訂單 API 失敗: " + e.getMessage());
+                    System.err.println("寫入訂單紀錄失敗: " + e.getMessage());
                 }
                 return null;
             }
