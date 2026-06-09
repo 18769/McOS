@@ -292,42 +292,27 @@ public class MealManagerGUI extends JFrame {
         
         // Tab 1
         // ==================== Tab 1: 原料消耗統計 (上下雙表格版) ====================
+       // ==================== Tab 1: 原料消耗統計 (動態合法日期版) ====================
         JPanel p1 = new JPanel(new BorderLayout());
         
-        // 【頂部控制區：改用你要求的分開下拉選單】
+        // 【頂部控制區：改成單一動態選單】
         JPanel p1Top = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        p1Top.add(new JLabel("選擇生產分析日期："));
+        p1Top.add(new JLabel("選擇現有生產分析日期："));
 
-        String[] years = {"2024", "2025", "2026", "2027"};
-        final JComboBox<String> yearBox = new JComboBox<>(years);
-        yearBox.setSelectedItem("2026");
-        p1Top.add(yearBox);
-        p1Top.add(new JLabel("年 "));
-
-        String[] months = {"01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"};
-        final JComboBox<String> monthBox = new JComboBox<>(months);
-        monthBox.setSelectedItem("04"); // 預設 4 月
-        p1Top.add(monthBox);
-        p1Top.add(new JLabel("月 "));
-
-        String[] days = new String[31];
-        for (int i = 1; i <= 31; i++) { days[i - 1] = String.format("%02d", i); }
-        final JComboBox<String> dayBox = new JComboBox<>(days);
-        dayBox.setSelectedItem("21"); // 預設 21 日
-        p1Top.add(dayBox);
-        p1Top.add(new JLabel("日 "));
+        // 🎯 建立唯一的日期下拉選單（一開始先放個載入中的提示）
+        final JComboBox<String> dateBox = new JComboBox<>(new String[]{"⏳ 正在載入歷史日期..."});
+        p1Top.add(dateBox);
 
         JButton btn1 = new JButton("計算實際消耗量");
         p1Top.add(btn1);
         p1.add(p1Top, BorderLayout.NORTH); 
 
         // 【中央主內容區：用 GridLayout 切成上下兩層】
-        JPanel centerPanel = new JPanel(new GridLayout(2, 1, 0, 10)); // 2行1列，上下排開
+        JPanel centerPanel = new JPanel(new GridLayout(2, 1, 0, 10)); 
         
         // ------------------ 🍔 上半部：當日點餐/套餐明細 ------------------
         JPanel upperPanel = new JPanel(new BorderLayout());
         upperPanel.setBorder(BorderFactory.createTitledBorder(" 上半部：當日銷售餐點 / 套餐明細 "));
-        // 建立上半部表格模型與表格
         DefaultTableModel mUpper = new DefaultTableModel(new String[]{"訂單編號", "顧客名稱", "點餐時間", "訂購內容"}, 0);
         JTable tableUpper = new JTable(mUpper);
         tableUpper.setRowHeight(22);
@@ -336,27 +321,56 @@ public class MealManagerGUI extends JFrame {
         // ------------------ 🚨 下半部：當日原物料消耗與預警 ------------------
         JPanel lowerPanel = new JPanel(new BorderLayout());
         lowerPanel.setBorder(BorderFactory.createTitledBorder(" 下半部：原物料消耗與庫存預警建議 "));
-        // 建立下半部表格模型（就是你原本的 m1 欄位）
         DefaultTableModel m1 = new DefaultTableModel(new String[]{"原料名稱", "實際消耗量", "單位", "庫存水位建議"}, 0);
         JTable table1 = new JTable(m1);
         table1.setRowHeight(25);
         lowerPanel.add(new JScrollPane(table1), BorderLayout.CENTER);
         
-        // 將上下兩部分塞進中央區
         centerPanel.add(upperPanel);
         centerPanel.add(lowerPanel);
         p1.add(centerPanel, BorderLayout.CENTER);
 
+        // 🚀 【動態載入歷史日期邏輯】：一打開視窗，自動去 PHP 抓有資料的日期塞進選單
+        new SwingWorker<org.json.JSONArray, Void>() {
+            @Override
+            protected org.json.JSONArray doInBackground() throws Exception {
+                String urlStr = "http://120.107.152.110/~a0303/DB/get_available_dates.php";
+                java.net.URL url = new java.net.URL(urlStr);
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                if (conn.getResponseCode() == 200) {
+                    java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
+                    StringBuilder sb = new StringBuilder(); String line;
+                    while ((line = r.readLine()) != null) sb.append(line);
+                    r.close();
+                    return new org.json.JSONArray(sb.toString());
+                }
+                return new org.json.JSONArray();
+            }
+            @Override
+            protected void done() {
+                try {
+                    org.json.JSONArray arr = get();
+                    if (arr != null && arr.length() > 0) {
+                        dateBox.removeAllItems(); // 清除載入中文字
+                        for (int i = 0; i < arr.length(); i++) {
+                            dateBox.addItem(arr.getString(i)); // 塞入真實合法的日期
+                        }
+                    }
+                } catch (Exception ex) {
+                    dateBox.removeAllItems();
+                    dateBox.addItem("無法載入日期");
+                }
+            }
+        }.execute();
 
-    
-        // 【按鈕點擊事件：一鍵將 JSON 解析並同步倒入上半部餐點與下半部原料表格】
+        // 【按鈕點擊事件：直接拿選單中的標準日期發送】
         btn1.addActionListener(e -> {
-            String selYear = (String) yearBox.getSelectedItem();
-            String selMonth = (String) monthBox.getSelectedItem();
-            String selDay = (String) dayBox.getSelectedItem();
-            String selectedDate = selYear + "-" + selMonth + "-" + selDay;
+            String selectedDate = (String) dateBox.getSelectedItem();
+            if (selectedDate == null || selectedDate.startsWith("⏳") || selectedDate.contains("無法")) {
+                statusLabel.setText("⚠️ 請先選擇一個合法的有效歷史日期！");
+                return;
+            }
             
-            // 同步清空上半部餐點與下半部原料
             mUpper.setRowCount(0);
             m1.setRowCount(0);
             statusLabel.setText("⏳ 正在計算 " + selectedDate + " 當日餐點與原物料連動數據...");
@@ -364,77 +378,51 @@ public class MealManagerGUI extends JFrame {
             new SwingWorker<org.json.JSONArray, Void>() {
                 @Override
                 protected org.json.JSONArray doInBackground() throws Exception {
-                    // 🚀 繞過舊方法的束縛，直接精準抓取我們更新後的 PHP
                     String urlStr = "http://120.107.152.110/~a0303/DB/get_consumption_report.php?date=" + selectedDate;
                     java.net.URL url = new java.net.URL(urlStr);
                     java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setConnectTimeout(5000);
-                    conn.setReadTimeout(5000);
-                    
                     if (conn.getResponseCode() == 200) {
-                        java.io.BufferedReader reader = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(conn.getInputStream(), "UTF-8")
-                        );
-                        StringBuilder sb = new StringBuilder();
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            sb.append(line);
-                        }
+                        java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
+                        StringBuilder sb = new StringBuilder(); String line;
+                        while ((line = reader.readLine()) != null) sb.append(line);
                         reader.close();
                         return new org.json.JSONArray(sb.toString());
                     }
-                    return new org.json.JSONArray(); // 失敗回傳空陣列
+                    return new org.json.JSONArray();
                 }
                 
                 @Override
                 protected void done() {
                     try {
                         org.json.JSONArray jsonArray = get();
-                        
                         if (jsonArray == null || jsonArray.length() == 0) {
-                            statusLabel.setText("⚠️ " + selectedDate + " 當日無任何餐點銷售或物料消耗紀錄。");
+                            statusLabel.setText("⚠️ " + selectedDate + " 當日無相關紀錄。");
                             return;
                         }
                         
-                        int mealCount = 0;
-                        int consCount = 0;
-                        
-                        // 逐筆讀取大包裹 JSON，依照 dataType 分流
+                        int mealCount = 0; int consCount = 0;
                         for (int i = 0; i < jsonArray.length(); i++) {
                             org.json.JSONObject row = jsonArray.getJSONObject(i);
                             String dataType = row.optString("dataType", "");
                             
-                            // 🍔 1. 分流到【上半部表格】：顯示當日有哪些餐點或套餐
                             if ("meal".equals(dataType)) {
                                 mUpper.addRow(new Object[]{
-                                    row.optInt("訂單編號"),
-                                    row.optString("顧客名稱"),
-                                    row.optString("點餐時間"),
-                                    row.optString("訂購內容") // 顯示餐點套餐名稱
+                                    row.optInt("訂單編號"), row.optString("顧客名稱"), row.optString("點餐時間"), row.optString("訂購內容")
                                 });
                                 mealCount++;
                             }
-                            
-                            // 🚨 2. 分流到【下半部表格】：顯示當日消耗哪些原物料
                             if ("consumption".equals(dataType)) {
                                 String status = row.optString("庫存狀態", "庫存充足");
                                 String displayStatus = status.contains("過低") || status.contains("極低") ? "🚨 " + status : 
                                                       (status.contains("偏低") ? "⚠️ " + status : "🟢 " + status);
                                                         
                                 m1.addRow(new Object[]{
-                                    row.optString("原料名稱"), 
-                                    row.optDouble("單日總消耗數量"), 
-                                    row.optString("單位"), 
-                                    displayStatus
+                                    row.optString("原料名稱"), row.optDouble("單日總消耗數量"), row.optString("單位"), displayStatus
                                 });
                                 consCount++;
                             }
                         }
-                        
-                        statusLabel.setText(String.format("✓ %s 載入完成！上半部餐點: %d 筆，下半部原料: %d 筆", 
-                                            selectedDate, mealCount, consCount));
-                        
+                        statusLabel.setText(String.format("✓ %s 載入完成！上半部餐點: %d 筆，下半部原料: %d 筆", selectedDate, mealCount, consCount));
                     } catch (Exception ex) {
                         statusLabel.setText("❌ 數據跨表解析錯誤");
                         ex.printStackTrace();
