@@ -24,7 +24,7 @@ def show_experiment_report():
         print("3. Aging 模式應能讓長任務的最長等待時間保持在合理範圍。")
 
     except Exception as e:
-        print(f"目前尚無數據可分析，請先完成一輪點餐流程！")
+        print("目前尚無數據可分析，請先完成一輪點餐流程！")
 
 if __name__ == "__main__":
     show_experiment_report()

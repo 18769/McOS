@@ -6,7 +6,8 @@ from . import algorithms
 
 
 class McOSScheduler:
-    def __init__(self):
+    def __init__(self, persistent_state=False):
+        self.persistent_state = persistent_state
         self.pending_queue = []
         self.order_tracker = {}
         self.strategy = algorithms.fcfs_logic
@@ -19,6 +20,70 @@ class McOSScheduler:
         }
         # 新增：追?每個 meal_group 分配給哪個 worker，防止員工搶步驟
         self.group_worker_mapping = {}
+        if self.persistent_state:
+            self._load_state()
+
+    def _get_state_paths(self):
+        """Return candidate paths for state file, in order of preference."""
+        import os
+        project_root = Path(__file__).resolve().parents[2]
+        candidates = [
+            project_root / "DB" / "scheduler_state.json",       # local dev: McOS/DB/
+            project_root / "scheduler_state.json",               # server: project_root itself is DB/
+            project_root / "webApp" / "scheduler_state.json",    # webApp subdir
+            Path("/tmp") / "mcOS_scheduler_state.json",          # Linux tmp (always writable)
+            Path(os.environ.get("TMPDIR", "/tmp")) / "mcOS_scheduler_state.json",
+        ]
+        return candidates
+
+    def _save_state(self):
+        if not self.persistent_state:
+            return
+        strategy_name = "FCFS"
+        if self.strategy == algorithms.sjf_logic:
+            strategy_name = "SJF"
+        elif self.strategy == algorithms.aging_logic:
+            strategy_name = "AGING"
+
+        state = {
+            "pending_queue": self.pending_queue,
+            "order_tracker": self.order_tracker,
+            "strategy_name": strategy_name,
+            "group_worker_mapping": self.group_worker_mapping
+        }
+        state_json = json.dumps(state, ensure_ascii=False, indent=2)
+
+        for path in self._get_state_paths():
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(state_json, encoding="utf-8")
+                return  # Success - stop trying
+            except Exception:
+                continue
+        # All paths failed - log to stderr so PHP can capture it
+        import sys
+        sys.stderr.write("WARNING: McOSScheduler could not save state to any path\n")
+
+    def _load_state(self):
+        for path in self._get_state_paths():
+            if not path.exists():
+                continue
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+                self.pending_queue = state.get("pending_queue", [])
+                self.order_tracker = state.get("order_tracker", {})
+                self.group_worker_mapping = state.get("group_worker_mapping", {})
+                
+                strategy_name = state.get("strategy_name", "FCFS")
+                if strategy_name == "SJF":
+                    self.strategy = algorithms.sjf_logic
+                elif strategy_name == "AGING":
+                    self.strategy = algorithms.aging_logic
+                else:
+                    self.strategy = algorithms.fcfs_logic
+                return  # Loaded successfully
+            except Exception:
+                continue
 
     def _load_workers(self):
         import urllib.request, urllib.error, json
@@ -46,21 +111,44 @@ class McOSScheduler:
         return [1, 2]
 
     def _load_equipment(self):
+        def _normalize(data):
+            if not isinstance(data, list):
+                return []
+            for equip in data:
+                equip.setdefault("status", "")
+                if equip.get("Etype") is None and equip.get("etype") is not None:
+                    equip["Etype"] = equip.get("etype")
+                if equip.get("equipmentID") is not None:
+                    equip["equipmentID"] = str(equip.get("equipmentID"))
+                if equip.get("Etype") is not None:
+                    equip["Etype"] = str(equip.get("Etype", "")).strip().lower()
+            return data
+
+        # Try local file first
         try:
             data = json.loads(self.equipment_path.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                for equip in data:
-                    equip.setdefault("status", "")
-                    if equip.get("Etype") is None and equip.get("etype") is not None:
-                        equip["Etype"] = equip.get("etype")
-                    if equip.get("equipmentID") is not None:
-                        equip["equipmentID"] = str(equip.get("equipmentID"))
-                    if equip.get("Etype") is not None:
-                        equip["Etype"] = str(equip.get("Etype", "")).strip().lower()
-                return data
+            normalized = _normalize(data)
+            if normalized:
+                return normalized
         except Exception:
             pass
+
+        # Fallback: load from HTTP API (works on server even if file path is wrong)
+        try:
+            import urllib.request
+            req = urllib.request.Request("http://120.107.152.110/~a0303/DB/get_equipment.php")
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    api_data = json.loads(response.read().decode("utf-8"))
+                    items = api_data.get("data", [])
+                    normalized = _normalize(items)
+                    if normalized:
+                        return normalized
+        except Exception:
+            pass
+
         return []
+
 
     def _save_equipment(self):
         try:
@@ -98,7 +186,7 @@ class McOSScheduler:
             pass
 
     def _worker_label(self, worker_id):
-        return f"W{worker_id}"
+        return "W{}".format(worker_id)
 
     def _clear_equipment_statuses(self):
         for equip in self.equipments:
@@ -120,6 +208,10 @@ class McOSScheduler:
             equipment_type_alias = "prep_station"
         elif "蒸" in equipment_type or "steam" in equipment_type:
             equipment_type_alias = "grill"
+        elif "drink" in equipment_type or "飲料" in equipment_type:
+            equipment_type_alias = "drink"
+        elif "coffee" in equipment_type or "咖啡" in equipment_type:
+            equipment_type_alias = "coffee"
 
         matching = []
         for equip in self.equipments:
@@ -128,7 +220,7 @@ class McOSScheduler:
             if etype == equipment_type_alias or etype == equipment_type:
                 matching.append(equip)
                 continue
-            if equipment_type in name or name in equipment_type:
+            if equipment_type in name or name in equipment_type or equipment_type_alias in name:
                 matching.append(equip)
                 continue
         if not matching:
@@ -161,7 +253,7 @@ class McOSScheduler:
 
     def optimize_schedule(self, new_orders):
         for order in new_orders:
-            order_id = order["id"]
+            order_id = str(order["id"])
             is_takeout = order.get("is_takeout", False)
             
             # --- 防呆機制 1：如果訂單沒包裝在 items 裡，就把訂單自己當成 item ---
@@ -173,7 +265,7 @@ class McOSScheduler:
             full_names = ",".join([item.get("meal_name", item.get("item", "unknown_meal")) for item in items])
 
             for idx, item in enumerate(items): 
-                base_meal_name = f"{item.get('meal_name', item.get('item', 'unknown_meal'))}_{idx}"
+                base_meal_name = "{}_{}".format(item.get('meal_name', item.get('item', 'unknown_meal')), idx)
                 
                 # --- 防呆機制 2：兼容新版 Recipe (有 steps) 與舊版格式 (無 steps) ---
                 steps = item.get("steps", [])
@@ -202,7 +294,7 @@ class McOSScheduler:
                         task_list.append({
                             "item": step.get("step_name"),  
                             "meal_name": base_meal_name,    
-                            "prep_time": step.get("duration_sec", 5), 
+                            "prep_time": int(step.get("duration_sec", 5)), 
                             "description": step.get("step_name"),
                             "equipment_type": step.get("equipment_type", ""),
                             "task_index": step_order if step_order is not None else index
@@ -211,7 +303,7 @@ class McOSScheduler:
                     task_list.append({
                         "item": item.get("item", "unknown_item"),  
                         "meal_name": base_meal_name,    
-                        "prep_time": item.get("prep_time", 5), 
+                        "prep_time": int(item.get("prep_time", 5)), 
                         "description": item.get("description", item.get("item", "")),
                         "equipment_type": item.get("equipment_type", ""),
                         "task_index": item.get("task_index", 0) 
@@ -252,21 +344,27 @@ class McOSScheduler:
             else:
                 new_tasks.append(task)
         
+        # Initialize available times to now (tasks cannot start before now)
+        current_timestamp = time.time()
         for worker_id in self.workers:
-            self.worker_available[worker_id] = 0
+            # Start from now or from whatever was previously scheduled
+            self.worker_available[worker_id] = current_timestamp
         for equipment_id in list(self.equipment_available.keys()):
-            self.equipment_available[equipment_id] = 0
-            
+            self.equipment_available[equipment_id] = current_timestamp
+
+        # Rebuild available times from already-allocated tasks
+        # These tasks have real expected_at timestamps, so we respect them
         for task in allocated_tasks:
             wid = task.get("worker_id")
             expected_at = task.get("expected_at", 0)
-            if wid is not None:
-                self.worker_available[wid] = max(self.worker_available.get(wid, 0), expected_at)
-            
-            eid = task.get("equipment_id")
-            if eid:
-                eid = str(eid)
-                self.equipment_available[eid] = max(self.equipment_available.get(eid, 0), expected_at)
+            # Only update if expected_at is in the future (task not yet complete)
+            if expected_at > current_timestamp:
+                if wid is not None:
+                    self.worker_available[wid] = max(self.worker_available.get(wid, current_timestamp), expected_at)
+                eid = task.get("equipment_id")
+                if eid:
+                    eid = str(eid)
+                    self.equipment_available[eid] = max(self.equipment_available.get(eid, current_timestamp), expected_at)
 
         # Build current equipment usage counts based on each worker's current task
         worker_current_tasks = {}
@@ -301,7 +399,7 @@ class McOSScheduler:
 
         for (order_id, meal_name), tasks in meal_groups.items():
             tasks = sorted(tasks, key=lambda t: int(t.get("task_index", 0)))
-            group_id = f"{order_id}:{meal_name}"
+            group_id = "{}:{}".format(order_id, meal_name)
             
             if group_id in self.group_worker_mapping:
                 selected_worker = self.group_worker_mapping[group_id]
@@ -314,7 +412,7 @@ class McOSScheduler:
             worker_has_current = selected_worker in workers_with_current_task
 
             for task in tasks:
-                prep_time = task.get("prep_time", 5)
+                prep_time = int(task.get("prep_time", 5))
                 start_time = current_time
 
                 selected_equipment_id = None
@@ -337,7 +435,7 @@ class McOSScheduler:
                     selected_equipment_id = str(selected_equipment_id)
                     task["equipment_id"] = selected_equipment_id
                     task["equipment_name"] = selected_equipment.get("name", selected_equipment_id)
-                    status_text = f"{self._worker_label(selected_worker)}:{task.get('item', 'unknown_item')}|{task.get('id')}"
+                    status_text = "{}:{}|{}".format(self._worker_label(selected_worker), task.get('item', 'unknown_item'), task.get('id'))
                     task["equipment_status"] = status_text
                     
                     self.equipment_available[selected_equipment_id] = finish_time
@@ -385,22 +483,26 @@ class McOSScheduler:
             worker_id = display_info["worker_id"]
             task = display_info["task"]
             user_count = equipment_usage_counts.get(str(equipment_id), 1)
-            status_text = f"使用中:{user_count}人"
+            status_text = "使用中:{}人".format(user_count)
             for equip in self.equipments:
                 if str(equip.get("equipmentID")) == str(equipment_id):
                     equip["status"] = status_text
                     break
 
         self._save_equipment()
+        self._save_state()
 
         return self.pending_queue
 
     def remove_finished(self, order_id, task_item=None):
+        # Convert order_id to string for consistent lookup
+        order_id = str(order_id)
+        
         # Remove task from queue
         removed_task = None
         for index in range(len(self.pending_queue) - 1, -1, -1):
             task = self.pending_queue[index]
-            if task.get("id") == order_id and (task_item is None or task.get("item") == task_item):
+            if str(task.get("id")) == order_id and (task_item is None or task.get("item") == task_item):
                 removed_task = self.pending_queue.pop(index)
                 break
 
@@ -451,31 +553,41 @@ class McOSScheduler:
                 self.worker_available[worker_id] = removed_task.get("expected_at", 0)
 
             # Decrement and check if order is complete
+            tracker_key = None
             if order_id in self.order_tracker:
-                self.order_tracker[order_id]["remaining_tasks"] -= 1
-                if self.order_tracker[order_id]["remaining_tasks"] <= 0:
-                    order_info = self.order_tracker[order_id]
-                    response["all_items_completed"] = True
-                    response["order_content"] = order_info["full_content_names"]
-                    
-                    # 清理該訂單相關的 group_id 映射
-                    groups_to_remove = [gid for gid in self.group_worker_mapping.keys() if gid.startswith(f"{order_id}:")]
-                    for gid in groups_to_remove:
-                        del self.group_worker_mapping[gid]
+                tracker_key = order_id
+            elif int(order_id) in self.order_tracker:
+                tracker_key = int(order_id)
+                
+            if tracker_key is not None:
+                if removed_task.get("is_pack_task") or removed_task.get("item") == "pack-bag":
+                    del self.order_tracker[tracker_key]
+                else:
+                    self.order_tracker[tracker_key]["remaining_tasks"] -= 1
+                    if self.order_tracker[tracker_key]["remaining_tasks"] <= 0:
+                        order_info = self.order_tracker[tracker_key]
+                        response["all_items_completed"] = True
+                        response["order_content"] = order_info["full_content_names"]
+                        
+                        # 清理該訂單相關的 group_id 映射
+                        prefix = "{}:".format(order_id)
+                        groups_to_remove = [gid for gid in list(self.group_worker_mapping.keys()) if str(gid).startswith(prefix) or str(gid).startswith(str(tracker_key) + ":")]
+                        for gid in groups_to_remove:
+                            del self.group_worker_mapping[gid]
 
-                    if order_info.get("is_takeout", False):
-                        self.pending_queue.insert(0, {
-                            "id": order_id,
-                            "order_name": order_info["full_content_names"],
-                            "item": "pack-bag",
-                            "prep_time": 4,
-                            "description": "pack-bag",
-                            "is_takeout": True,
-                            "is_pack_task": True,
-                            "task_index": 999
-                        })
-                    else:
-                        del self.order_tracker[order_id]
+                        if order_info.get("is_takeout", False):
+                            self.pending_queue.insert(0, {
+                                "id": order_id,
+                                "order_name": order_info["full_content_names"],
+                                "item": "pack-bag",
+                                "prep_time": 4,
+                                "description": "pack-bag",
+                                "is_takeout": True,
+                                "is_pack_task": True,
+                                "task_index": 999
+                            })
+                        else:
+                            del self.order_tracker[tracker_key]
 
         response["queue"] = self._reschedule()
         return response

@@ -90,7 +90,7 @@ def start_engine():
                     if isinstance(steps, list) and len(steps) > 0:
                         items = []
                         for idx, step in enumerate(steps):
-                            step_name = step.get('step_name') or step.get('description') or f"{meal_name} step"
+                            step_name = step.get('step_name') or step.get('description') or "{} step".format(meal_name)
                             duration = step.get('duration_sec', step.get('prep_time', 1))
                             items.append({
                                 'item': step_name,
@@ -112,7 +112,7 @@ def start_engine():
                     if recipe and isinstance(recipe.get('steps'), list) and len(recipe.get('steps')) > 0:
                         items = []
                         for idx, step in enumerate(recipe['steps']):
-                            step_name = step.get('step_name', f"{meal_name} step")
+                            step_name = step.get('step_name', "{} step".format(meal_name))
                             items.append({
                                 'item': step_name,
                                 'prep_time': int(step.get('duration_sec', 1)),

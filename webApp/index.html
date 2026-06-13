@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>McOS Mobile Control Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <!-- Premium Header -->
+    <header class="app-header">
+        <div class="header-logo">
+            <span class="logo-icon">🍔</span>
+            <div class="logo-text">
+                <h1>McOS Mobile</h1>
+                <span class="status-indicator online" id="connection-status">Connecting to backend...</span>
+            </div>
+        </div>
+        <div class="header-actions">
+            <select id="strategy-selector" class="strategy-dropdown">
+                <option value="FCFS">FCFS (先來先服務)</option>
+                <option value="SJF">SJF (短工作優先)</option>
+                <option value="AGING">AGING (老化演算法)</option>
+            </select>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="app-content">
+        <!-- Tab 1: Kitchen View -->
+        <section id="tab-kitchen" class="tab-pane active">
+            <div class="section-title">
+                <h2>廚房現場看板 <span class="badge" id="queue-count">0</span></h2>
+                <button id="btn-refresh-kitchen" class="btn-icon">🔄</button>
+            </div>
+            
+            <div class="kitchen-grid">
+                <!-- Left Column: Order Panel & Queue -->
+                <div class="left-column">
+                    <!-- Order Control Panel -->
+                    <div class="card card-order-panel">
+                        <div class="card-header">
+                            <div class="panel-tabs">
+                                <button class="panel-tab-btn active" data-panel-tab="panel-manual">🍔 手動點餐</button>
+                                <button class="panel-tab-btn" data-panel-tab="panel-script">🤖 腳本點餐</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <!-- Subpanel A: Manual Order -->
+                            <div id="panel-manual" class="panel-tab-content active">
+                                <div class="order-form-row">
+                                    <div class="form-group flex-2">
+                                        <label for="order-item-select">選擇餐點或套餐</label>
+                                        <select id="order-item-select" class="form-input">
+                                            <option value="">-- 請選擇 --</option>
+                                            <!-- Dynamic Load Meals & Combos -->
+                                        </select>
+                                    </div>
+                                    <div class="form-group flex-1">
+                                        <label for="order-count-input">數量</label>
+                                        <input type="number" id="order-count-input" class="form-input" min="1" value="1">
+                                    </div>
+                                </div>
+                                
+                                <div class="order-options-row">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="order-takeout-checkbox">
+                                        <span class="checkmark"></span>
+                                        🥡 外帶 (Takeout)
+                                    </label>
+                                </div>
+
+                                <div class="action-buttons-row">
+                                    <button id="btn-add-buffer" class="btn" style="background: rgba(255,255,255,0.06); color: white; border: 1px solid var(--border-glow); flex: 1;">加入緩衝區</button>
+                                    <button id="btn-send-orders" class="btn btn-primary" style="flex: 1.5;">提交點餐</button>
+                                    <button id="btn-clear-buffer" class="btn btn-danger" style="flex: 0.5;">清空</button>
+                                </div>
+
+                                <!-- Buffer Display -->
+                                <div class="order-buffer-container">
+                                    <span class="buffer-label">點餐緩衝區 (已加入但未提交):</span>
+                                    <div id="order-buffer-list" class="buffer-list">
+                                        <span class="empty-buffer">緩衝區為空</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Subpanel B: Script System -->
+                            <div id="panel-script" class="panel-tab-content">
+                                <div class="form-group">
+                                    <label for="script-json-input">JSON 腳本輸入</label>
+                                    <textarea id="script-json-input" rows="6" class="script-textarea" placeholder='請貼上 JSON 腳本步驟...'></textarea>
+                                </div>
+                                <div class="action-buttons-row">
+                                    <button id="btn-run-script" class="btn btn-primary" style="flex: 1.5;">▶ 執行腳本</button>
+                                    <button id="btn-stop-script" class="btn btn-danger" style="flex: 1.5; display: none;">🛑 中斷腳本</button>
+                                    <button id="btn-load-preset-script" class="btn" style="background: rgba(255,255,255,0.06); color: white; border: 1px solid var(--border-glow); flex: 1;">載入範例</button>
+                                </div>
+                                <div class="script-status-bar">
+                                    <span id="script-status-text">狀態: 待命</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Order Queue Card -->
+                    <div class="card card-queue">
+                        <div class="card-header">
+                            <h3>排程製作序列</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="kitchen-queue-list" class="queue-list">
+                                <div class="empty-state">目前無排程中的訂單</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Completed Orders Card -->
+                    <div class="card card-completed" style="margin-top: 12px;">
+                        <div class="card-header">
+                            <h3>已完成紀錄</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="completed-orders-list" class="queue-list" style="max-height: 200px; overflow-y: auto;">
+                                <div class="empty-state">尚無已完成的訂單</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Equipment & Workers Status -->
+                <div class="card card-status">
+                    <div class="card-header">
+                        <h3>設備與人員狀態</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="status-sub-section">
+                            <h4>🍳 廚房設備狀態</h4>
+                            <div id="equipment-status-list" class="status-grid">
+                                <!-- Equipment dynamic load -->
+                            </div>
+                        </div>
+                        <div class="status-sub-section">
+                            <h4>👤 廚房員工狀態</h4>
+                            <div id="worker-status-list" class="status-grid">
+                                <!-- Workers dynamic load -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tab 2: Meal Manager with BOM -->
+        <section id="tab-manager" class="tab-pane">
+            <div class="section-title">
+                <h2>餐點管理 / BOM 物料管理</h2>
+                <div style="display: flex; gap: 8px;">
+                    <button id="btn-add-meal" class="btn btn-primary">+ 新增餐點</button>
+                    <button id="btn-add-combo" class="btn btn-primary" style="background: var(--color-info); color: white;">+ 新增套餐</button>
+                </div>
+            </div>
+
+            <!-- Manager Sub-Tabs -->
+            <div class="bom-subtabs">
+                <button class="bom-subtab-btn active" data-bom-tab="bom-panel-meals">🍔 餐點列表</button>
+                <button class="bom-subtab-btn" data-bom-tab="bom-panel-recipe">📋 食譜步驟</button>
+                <button class="bom-subtab-btn" data-bom-tab="bom-panel-bom">🌲 BOM 展開</button>
+                <button class="bom-subtab-btn" data-bom-tab="bom-panel-stock">🏪 安全庫存</button>
+                <button class="bom-subtab-btn" data-bom-tab="bom-panel-sql">🗄️ SQL 查詢</button>
+            </div>
+
+            <!-- Sub-Panel: Meals & Combos -->
+            <div id="bom-panel-meals" class="bom-panel active">
+                <div class="manager-grid">
+                    <div class="card">
+                        <div class="card-header"><h3>餐點列表 (Meals)</h3></div>
+                        <div class="card-body table-responsive">
+                            <table class="data-table" id="meals-table">
+                                <thead><tr><th>ID</th><th>餐點名稱</th><th>預計準備時間</th><th>操作</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><h3>套餐列表 (Combo Meals)</h3></div>
+                        <div class="card-body table-responsive">
+                            <table class="data-table" id="combos-table">
+                                <thead><tr><th>ID</th><th>套餐名稱</th><th>內含單點</th><th>操作</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-Panel: Recipe Steps -->
+            <div id="bom-panel-recipe" class="bom-panel">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>📋 食譜步驟管理</h3>
+                        <button id="btn-load-recipes" class="btn btn-primary" style="padding: 6px 14px; font-size: 13px;">🔄 載入食譜</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="recipe-meal-select">選擇餐點查看食譜</label>
+                            <select id="recipe-meal-select" class="form-input" style="max-width: 260px;">
+                                <option value="">-- 請選擇餐點 --</option>
+                            </select>
+                        </div>
+                        <div id="recipe-steps-container" class="recipe-tree">
+                            <div class="empty-state">請選擇餐點或點擊「載入食譜」</div>
+                        </div>
+                        <div class="sql-badge" id="sql-recipe" style="margin-top: 12px; display: none;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-Panel: BOM Explosion (Combo→Meal→Material) -->
+            <div id="bom-panel-bom" class="bom-panel">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>🌲 BOM 物料展開（套餐 → 餐點 → 原物料）</h3>
+                        <div style="display: flex; gap: 8px;">
+                            <button id="btn-bom-meal" class="btn" style="background: rgba(255,255,255,0.08); color: white; border: 1px solid var(--border-glow); padding: 6px 14px; font-size: 13px;">🍔 單品 BOM</button>
+                            <button id="btn-bom-combo" class="btn btn-primary" style="padding: 6px 14px; font-size: 13px;">🍱 套餐爆炸圖</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="bom-tree-output" class="bom-tree-display">
+                            <div class="empty-state">點擊上方按鈕載入 BOM 展開</div>
+                        </div>
+                        <div class="sql-badge" id="sql-bom" style="margin-top: 12px; display: none;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-Panel: Safety Stock / Ingredients -->
+            <div id="bom-panel-stock" class="bom-panel">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>🏪 原物料庫存 / 安全庫存預警</h3>
+                        <button id="btn-load-stock" class="btn btn-primary" style="padding: 6px 14px; font-size: 13px;">🔄 載入庫存</button>
+                    </div>
+                    <div class="card-body table-responsive">
+                        <table class="data-table" id="stock-table">
+                            <thead>
+                                <tr>
+                                    <th>原料 ID</th>
+                                    <th>原料名稱</th>
+                                    <th>計量單位</th>
+                                    <th>現有存量</th>
+                                    <th>庫存狀態</th>
+                                </tr>
+                            </thead>
+                            <tbody><tr><td colspan="5" class="empty-state">請點擊「載入庫存」</td></tr></tbody>
+                        </table>
+                        <div class="sql-badge" id="sql-stock" style="margin-top: 12px; display: none;"></div>
+                    </div>
+                </div>
+
+                <!-- Consumption Report -->
+                <div class="card" style="margin-top: 12px;">
+                    <div class="card-header">
+                        <h3>📊 歷史消耗分析</h3>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <select id="consumption-date-select" class="form-input" style="max-width: 160px; padding: 6px 10px; font-size: 13px;">
+                                <option value="">載入日期...</option>
+                            </select>
+                            <button id="btn-load-consumption" class="btn btn-primary" style="padding: 6px 14px; font-size: 13px;">查詢</button>
+                        </div>
+                    </div>
+                    <div class="card-body table-responsive">
+                        <table class="data-table" id="consumption-table">
+                            <thead>
+                                <tr>
+                                    <th>原料名稱</th>
+                                    <th>當日消耗量</th>
+                                    <th>單位</th>
+                                </tr>
+                            </thead>
+                            <tbody><tr><td colspan="3" class="empty-state">請選擇日期後查詢</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-Panel: SQL Viewer -->
+            <div id="bom-panel-sql" class="bom-panel">
+                <div class="card">
+                    <div class="card-header"><h3>🗄️ 資料庫 SQL 查詢語句</h3></div>
+                    <div class="card-body">
+                        <div class="sql-viewer">
+                            <div class="sql-section">
+                                <div class="sql-section-title">📋 查詢所有餐點</div>
+                                <pre class="sql-code">SELECT meal_id, meal_name, prep_time
+FROM McOS_meal
+ORDER BY meal_id;</pre>
+                            </div>
+                            <div class="sql-section">
+                                <div class="sql-section-title">🍱 查詢套餐 + 包含餐點</div>
+                                <pre class="sql-code">select `c`.`comboID` AS `套餐編號`,`c`.`comboName` AS `套餐名稱`
+                                    ,group_concat(concat(`i`.`ing_name`,' x',`total_ing`.`total_qty`,`i`.`unit`) separator '、') AS `總原物料需求` 
+                                    from ((`a0303`.`McOS_comboMeals_new_new` `c` join (select `cd`.`comboID` AS `comboID`,`mc`.`ingID` AS `ingID`,sum((`cd`.`quantity` * `mc`.`qty`)) AS `total_qty` 
+                                    from (`a0303`.`McOS_comboDetail_new_new` `cd` join `a0303`.`McOS_mealCost` `mc` on((`cd`.`mealID` = `mc`.`mealID`))) group by `cd`.`comboID`,`mc`.`ingID`) `total_ing` on((`c`.`comboID` = `total_ing`.`comboID`))) join `a0303`.`McOS_ingredients` `i` on((`total_ing`.`ingID` = `i`.`ing_id`))) group by `c`.`comboID`,`c`.`comboName`;</pre>
+                            </div>
+                            <div class="sql-section">
+                                <div class="sql-section-title">📋 查詢食譜步驟（JOIN 設備類型）</div>
+                                <pre class="sql-code">SELECT * FROM McOS_recipe AS r JOIN McOS_meal AS m ON r.mealID=m.meal_id ORDER BY stepOrder;</pre>
+                            </div>
+                            <div class="sql-section">
+                                <div class="sql-section-title">🌲 單品 BOM（餐點 → 原物料）</div>
+                                <pre class="sql-code">SELECT 
+    `m`.`meal_name` AS `餐點名稱`,
+    GROUP_CONCAT(CONCAT(`i`.`ing_name`, ' x ', `mc`.`qty`, `i`.`unit`) SEPARATOR '、') AS `標準配方與用量` 
+  FROM ((`McOS_meal` `m` 
+  JOIN `McOS_mealCost` `mc` ON ((`m`.`meal_id` = `mc`.`mealID`))) 
+  JOIN `McOS_ingredients` `i` ON ((`mc`.`ingID` = `i`.`ing_id`))) 
+  GROUP BY `m`.`meal_id`</pre>
+                            </div>
+                            <div class="sql-section">
+                                <div class="sql-section-title">🌴 套餐物料爆炸圖（二級 BOM）</div>
+                                <pre class="sql-code">/* 套餐 → 餐點 → 原物料 二級展開 */
+SELECT 
+            `c`.`comboID` AS `套餐編號`,
+            `c`.`comboName` AS `套餐名稱`,
+            
+            -- 1. 串接內含單品（對應圖中的黃色漢堡圖示清單）
+            GROUP_CONCAT(
+            DISTINCT CONCAT(`m`.`meal_name`, ' * ', `cd`.`quantity`) 
+            SEPARATOR '、'
+            ) AS `內含單品`,
+            
+            -- 2. 串接總原物料需求（對應圖中的綠色字體）
+            `total_ing`.`總原物料需求`
+            
+        FROM `a0303`.`McOS_comboMeals_new_new` `c`
+        
+        -- 連接單品明細與單品名稱表（已修正欄位為 meal_id）
+        LEFT JOIN `a0303`.`McOS_comboDetail_new_new` `cd` ON `c`.`comboID` = `cd`.`comboID`
+        LEFT JOIN `a0303`.`McOS_meal` `m` ON `cd`.`mealID` = `m`.`meal_id`
+        
+        -- 連接總原料計算子查詢
+        LEFT JOIN (
+            SELECT 
+            `sub_cd`.`comboID`,
+            GROUP_CONCAT(
+                CONCAT(`i`.`ing_name`, ' x', `sub_total`.`total_qty`, `i`.`unit`) 
+                SEPARATOR '、'
+            ) AS `總原物料需求`
+            FROM `a0303`.`McOS_comboDetail_new_new` `sub_cd`
+            JOIN `a0303`.`McOS_mealCost` `mc` ON `sub_cd`.`mealID` = `mc`.`mealID`
+            JOIN (
+            SELECT 
+                `cd2`.`comboID`, 
+                `mc2`.`ingID`, 
+                SUM((`cd2`.`quantity` * `mc2`.`qty`)) AS `total_qty`
+            FROM `a0303`.`McOS_comboDetail_new_new` `cd2`
+            JOIN `a0303`.`McOS_mealCost` `mc2` ON `cd2`.`mealID` = `mc2`.`mealID`
+            GROUP BY `cd2`.`comboID`, `mc2`.`ingID`
+            ) `sub_total` ON `sub_cd`.`comboID` = `sub_total`.`comboID` AND `mc`.`ingID` = `sub_total`.`ingID`
+            JOIN `a0303`.`McOS_ingredients` `i` ON `mc`.`ingID` = `i`.`ing_id`
+            GROUP BY `sub_cd`.`comboID`
+        ) `total_ing` ON `c`.`comboID` = `total_ing`.`comboID`
+        
+        GROUP BY `c`.`comboID`, `c`.`comboName`, `total_ing`.`總原物料需求`
+        ORDER BY `c`.`comboID`</pre>
+                            </div>
+                            <div class="sql-section">
+                                <div class="sql-section-title">📊 歷史消耗分析（View）</div>
+                                <pre class="sql-code">/* 查詢指定日期的原物料消耗 */
+SQL: SELECT 原料名稱, 單日總消耗數量, 單位
+FROM View_Daily_Total_Consumption
+WHERE 日期 = '20xx-xx-xx';</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- Tab 3: HR Dashboard (Embedded Roster & remote webpage) -->
+        <section id="tab-hr" class="tab-pane">
+            <div class="section-title">
+                <h2>HR 績效與排班看板</h2>
+            </div>
+            
+            <div class="hr-container">
+                <!-- Embedded Remote Roster Dashboard -->
+                <div class="dashboard-iframe-wrapper">
+                    <iframe src="http://120.107.152.110/~a0303/DB/dashboard_real.html" class="dashboard-iframe" title="HR Dashboard"></iframe>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Navigation Tab Bar (Bottom Fixed for iOS feel) -->
+    <nav class="tab-bar">
+        <button class="tab-item active" data-tab="tab-kitchen">
+            <span class="tab-icon">🍳</span>
+            <span class="tab-label">廚房看板</span>
+        </button>
+        <button class="tab-item" data-tab="tab-manager">
+            <span class="tab-icon">📋</span>
+            <span class="tab-label">餐點管理</span>
+        </button>
+        <button class="tab-item" data-tab="tab-hr">
+            <span class="tab-icon">📊</span>
+            <span class="tab-label">HR 看板</span>
+        </button>
+    </nav>
+
+    <!-- Simple Add Meal Modal -->
+    <div id="add-meal-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>新增餐點</h3>
+                <span class="close-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="add-meal-form">
+                    <div class="form-group">
+                        <label for="meal-name">餐點名稱</label>
+                        <input type="text" id="meal-name" required placeholder="例如: 大麥克">
+                    </div>
+                    <div class="form-group">
+                        <label for="meal-prep">預計準備時間 (秒)</label>
+                        <input type="number" id="meal-prep" required min="1" value="180">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">確認新增</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <!-- Simple Add Combo Modal -->
+    <div id="add-combo-modal" class="modal">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3>新增套餐</h3>
+                <span class="close-combo-modal" style="font-size: 24px; cursor: pointer; color: var(--text-secondary);">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="add-combo-form">
+                    <div class="form-group">
+                        <label for="combo-name-input">套餐名稱</label>
+                        <input type="text" id="combo-name-input" class="form-input" required placeholder="例如: 經典大麥克餐" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-glow); border-radius: 8px; color: white; padding: 8px 12px; font-family: var(--font-sans); font-size: 14px; outline: none;">
+                    </div>
+                    <div class="form-group">
+                        <label>選擇包含的單點餐點 (可複選)</label>
+                        <div id="combo-meals-checkboxes" style="max-height: 200px; overflow-y: auto; background: rgba(0, 0, 0, 0.2); padding: 10px; border-radius: 8px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border-glow);">
+                            <!-- Dynamic checkboxes list of meals -->
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block" style="width: 100%; margin-top: 10px;">確認新增套餐</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
